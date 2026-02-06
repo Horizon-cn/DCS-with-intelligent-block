@@ -1,0 +1,11 @@
+remote:
+  host: "127.0.0.1"
+  port: 23000
+sim:
+  object_path: "/blueRobot"
+  scene_path: "/messaging/movementViaRemoteApitest.ttt"
+  switch_period_s: 10.0
+  delta_per_step: 0.001
+run:
+  max_steps: 1000     # 先别追求“永动”，项目里建议可控
+  print_every: 1
