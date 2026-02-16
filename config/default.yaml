@@ -2,10 +2,31 @@ remote:
   host: "127.0.0.1"
   port: 23000
 sim:
-  object_path: "/blueRobot"
   scene_path: "/messaging/movementViaRemoteApitest.ttt"
   switch_period_s: 10.0
-  delta_per_step: 0.001
+  delta_per_step: 0.02
+  grid_size: 0.25
+  scaling_factor: 40.0
+objects:
+  - name: "UR5_1"
+    path: "/UR5_1"
+    type: "robot"
+  - name: "UR5_2"
+    path: "/UR5_2"
+    type: "robot"
+
+  - name: "Block_1"
+    path: "/Block_1"
+    type: "block"
+  - name: "Block_2"
+    path: "/Block_2"
+    type: "block"
+  - name: "Block_3"
+    path: "/Block_3"
+    type: "block"
+  - name: "Block_4"
+    path: "/Block_4"
+    type: "block"  
 run:
-  max_steps: 1000     # 先别追求“永动”，项目里建议可控
+  max_steps: 100     # 先别追求“永动”，项目里建议可控
   print_every: 1
