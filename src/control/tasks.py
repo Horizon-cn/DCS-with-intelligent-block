@@ -28,11 +28,24 @@ class SimpleMoveTask:
         p = step(sim, obj, self.i, self.delta)
 
         return t, self.i, p
+    
+    def update_g(self, sim, obj):
+        t = sim.getSimulationTime()
+
+        if t - self.prev_t > self.switch_period_s:
+            self.prev_t = t
+            self.i = (self.i + 1) % 3
+            if self.i == 0:
+                self.delta = -self.delta
+
+        p = step(sim, obj, self.i, self.delta)
+
+        return t, self.i, p
 
 class MoveToTargetTask:
-    def __init__(self, sim, blocks, cfg=None):
+    def __init__(self, sim, blocks, cfg=None, delta_per_step=0.002):
         self.reached = False
-        self.stepsize = cfg["sim"]["delta_per_step"]
+        self.stepsize = delta_per_step
 
         self.map = Grid(bounds=[[0, 400], [0, 400]])
         self.map.fill_boundary_with_obstacles()
@@ -46,11 +59,7 @@ class MoveToTargetTask:
             print(f"Marking grid cells from ({x_min}, {y_min}) to ({x_max}, {y_max}) as obstacles")
             
             self.map.type_map[x_min:x_max+1, y_min:y_max+1] = TYPES.OBSTACLE
-        self.map.inflate_obstacles(radius=7)
-
-
-        
-
+        self.map.inflate_obstacles(radius=7)    
 
     def setup(self, target_pos, sim, obj):
         self.target_pos = target_pos
@@ -74,7 +83,7 @@ class MoveToTargetTask:
             target_3d = [target_2d[0], target_2d[1], self.target_pos[2]]
             
             # 只比较x, y坐标（前2个维度）
-            if all(abs(current_pos[i] - target_2d[i]) < 0.01 for i in range(2)):
+            if all(abs(current_pos[i] - target_3d[i]) < 0.01 for i in range(3)):
                 self.current_i += 1
                 if self.current_i >= len(self.tragetory):
                     self.reached = True
@@ -83,3 +92,5 @@ class MoveToTargetTask:
                     client.step()
 
         return
+    
+#class GraspTask:

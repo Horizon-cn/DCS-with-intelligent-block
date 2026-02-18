@@ -18,6 +18,7 @@ def main():
 
     task = SimpleMoveTask(cfg["sim"]["switch_period_s"], cfg["sim"]["delta_per_step"])
     UR5_1 = sim.getObject(robot_paths["UR5_1"])
+    delta_per_step = cfg["sim"]["delta_per_step"]
 
     blocks = {name: sim.getObject(path) for name, path in block_paths.items()}
 
@@ -27,7 +28,7 @@ def main():
     try:
         t0 = sim.getSimulationTime()
         task.reset(t0)
-        sim.setObjectPosition(UR5_1, -1, [5, 5, 0])  # 初始位置
+        sim.setObjectPosition(UR5_1, -1, [5, 5, 0])  
 
         for k in range(cfg["run"]["max_steps"]):
             t, axis, p = task.update(sim, UR5_1)
@@ -37,7 +38,7 @@ def main():
 
             client.step()
 
-        task = MoveToTargetTask(sim, blocks, cfg=cfg)
+        task = MoveToTargetTask(sim, blocks, cfg=cfg, delta_per_step=delta_per_step)
         task.setup([5, 5, 0], sim, UR5_1)
         task.begin(client, sim, UR5_1)
 
@@ -51,7 +52,7 @@ def main():
 
         time.sleep(1)  # 延迟1秒
 
-        task.setup([0.25, 0.25, 0], sim, UR5_1)
+        task.setup([4, 4, 0], sim, UR5_1)
         task.begin(client, sim, UR5_1)
 
     except KeyboardInterrupt:

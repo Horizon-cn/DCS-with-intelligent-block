@@ -5,6 +5,7 @@ sim:
   scene_path: "/messaging/movementViaRemoteApitest.ttt"
   switch_period_s: 10.0
   delta_per_step: 0.02
+  delta_per_step2: 0.002
   grid_size: 0.25
   scaling_factor: 40.0
 objects:
@@ -27,6 +28,17 @@ objects:
   - name: "Block_4"
     path: "/Block_4"
     type: "block"  
+
+  - name: "Block_1_1"
+    path: "/Block_1_1"
+    type: "block"
+  - name: "Block_2_1"
+    path: "/Block_2_1"
+    type: "block"
+  - name: "Block_3_1"
+    path: "/Block_3_1"
+    type: "block"
+
 run:
-  max_steps: 100     # 先别追求“永动”，项目里建议可控
+  max_steps: 50     # 先别追求“永动”，项目里建议可控
   print_every: 1
