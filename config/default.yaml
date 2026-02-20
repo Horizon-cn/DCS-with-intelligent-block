@@ -8,6 +8,9 @@ sim:
   delta_per_step2: 0.002
   grid_size: 0.25
   scaling_factor: 40.0
+run:
+  max_steps: 50     # 先别追求“永动”，项目里建议可控
+  print_every: 1
 objects:
   - name: "UR5_1"
     path: "/UR5_1"
@@ -16,6 +19,10 @@ objects:
     path: "/UR5_2"
     type: "robot"
 
+  - name: "Block_0"
+    path: "/Block_0"
+    type: "block"
+    
   - name: "Block_1"
     path: "/Block_1"
     type: "block"
@@ -28,17 +35,45 @@ objects:
   - name: "Block_4"
     path: "/Block_4"
     type: "block"  
-
-  - name: "Block_1_1"
-    path: "/Block_1_1"
+  - name: "Block_5"
+    path: "/Block_5"
     type: "block"
-  - name: "Block_2_1"
-    path: "/Block_2_1"
+  - name: "Block_6"
+    path: "/Block_6"
     type: "block"
-  - name: "Block_3_1"
-    path: "/Block_3_1"
+  - name: "Block_7"
+    path: "/Block_7"
     type: "block"
-
-run:
-  max_steps: 50     # 先别追求“永动”，项目里建议可控
-  print_every: 1
+  - name: "Block_8"
+    path: "/Block_8"
+    type: "block"
+  - name: "Block_9"
+    path: "/Block_9"
+    type: "block"
+  - name: "Block_10"
+    path: "/Block_10"
+    type: "block"
+  - name: "Block_11"
+    path: "/Block_11"
+    type: "block"  
+  - name: "Block_12"
+    path: "/Block_12"
+    type: "block"
+  - name: "Block_13"
+    path: "/Block_13"
+    type: "block"
+  - name: "Block_14"
+    path: "/Block_14"
+    type: "block"
+  - name: "Block_15"
+    path: "/Block_15"
+    type: "block"  
+  - name: "Block_16"
+    path: "/Block_16"
+    type: "block"
+  - name: "Block_17"
+    path: "/Block_17"
+    type: "block"
+  - name: "Block_18"
+    path: "/Block_18"
+    type: "block"

@@ -31,6 +31,7 @@ def set_gripper_data(open_gripper, velocity=0.11, force=20):
 # Initialize some values.
 block_paths = utils.get_all_block_paths(cfg)
 jointHandles = [sim.getObjectHandle(f"UR5_joint{i}") for i in range(1, 7)]
+print("Joint handles:", jointHandles)
 ikTip = sim.getObject("/UR5_1/UR5_ikTip")
 ikTarget = sim.getObject("/UR5_1/UR5_ikTarget")
 modelBase = sim.getObject("/UR5_1")
@@ -55,20 +56,20 @@ ikMaxJerk = [0.6, 0.6, 0.6, 0.8]
 
 initialConfig = [0, 0, 0, 0, 0, 0]
 pickConfig = [
-    -70.1 * deg2rad,
-    18.85 * deg2rad,
-    93.18 * deg2rad,
-    68.02 * deg2rad,
-    109.9 * deg2rad,
-    90 * deg2rad,
+    -70.1 ,
+    18.85 ,
+    93.18 ,
+    68.02 ,
+    109.9 ,
+    90 ,
 ]
 dropConfig1 = [
-    -183.34 * deg2rad,
-    14.76 * deg2rad,
-    78.26 * deg2rad,
-    -2.98 * deg2rad,
-    -90.02 * deg2rad,
-    86.63 * deg2rad,
+    -183.34 ,
+    14.76 ,
+    78.26 ,
+    -2.98 ,
+    -90.02 ,
+    86.63 ,
 ]
 dropConfig2 = [
     -197.6 * deg2rad,
@@ -112,25 +113,67 @@ for k in range(cfg["run"]["max_steps"]):
         print(f"[k={k}] t={t:.2f}s axis={axis} pos={p}")
 
     client.step()
-task2 = MoveToTargetTask(sim, blocks, cfg=cfg)
-task2.setup([5, 5, 0.5], sim, ikTarget)
-task2.begin(client, sim, ikTarget)
-task2.setup([4.87, 4.86, 0.7], sim, ikTarget)
-task2.begin(client, sim, ikTarget)
-task2.setup([4.96, 4.79, 0.67], sim, ikTarget)
-task2.begin(client, sim, ikTarget)
-task2.setup([5.03, 5, 1], sim, ikTarget)
-task2.begin(client, sim, ikTarget)
-print("done")
+#task2 = MoveToTargetTask(sim, blocks, cfg=cfg)
+#task2.setup([5, 5, 0.5], sim, ikTarget)
+#task2.begin(client, sim, ikTarget)
+#task2.setup([4.87, 4.86, 0.7], sim, ikTarget)
+#task2.begin(client, sim, ikTarget)
+#task2.setup([4.96, 4.79, 0.67], sim, ikTarget)
+#task2.begin(client, sim, ikTarget)
+#task2.setup([5.03, 5, 1], sim, ikTarget)
+#task2.begin(client, sim, ikTarget)
+#print("done")
 
-while True:
-    client.step()
-
-sim.stopSimulation()
-
+sim.setObjectOrientation(modelBase, sim.handle_world, [0.0, 0.0, math.pi])
 
 set_gripper_data(True)
-sim.setInt32Param(sim.intparam_current_page, 0)
+sim.wait(1)
+#sim.setObjectOrientation(ikTarget, sim.handle_world, [math.radians(90), math.radians(-5), math.radians(100)])
+#sim.setObjectOrientation(ikTip, sim.handle_world, [math.radians(90), math.radians(-5), math.radians(100)])
+
+while True:
+    pos = sim.getObjectPosition(ikTip, -1)
+
+    sim.rmlMoveToPosition(
+        ikTarget,
+        modelBase,
+        -1,
+        None,
+        None,
+        ikMaxVel,
+        ikMaxAccel,
+        ikMaxJerk,
+        [-0.50158, -0.02511, +0.11163],
+        [-0.5, 0.5, -0.5, -0.5],
+        None,
+    )
+
+    #task2 = MoveToTargetTask(sim, blocks, cfg=cfg)
+    #task2.setup([5, 4.8, 0.7], sim, ikTarget)
+    #task2.begin(client, sim, ikTarget)
+
+    print("Gripping part...")
+
+    set_gripper_data(False)
+    sim.wait(1)
+
+    sim.rmlMoveToPosition(
+        ikTarget,
+        modelBase,
+        -1,
+        None,
+        None,
+        ikMaxVel,
+        ikMaxAccel,
+        ikMaxJerk,
+        [0, -0.1, 0.6],
+        [0.7071, 0.0, 0.0, 0.7071],
+        None,
+    )
+
+    set_gripper_data(True)
+    sim.wait(1)
+
 
 while droppedPartsCnt < 6:
 
@@ -146,7 +189,8 @@ while droppedPartsCnt < 6:
         targetVel,
     )
 
-    sim.setInt32Param(sim.intparam_current_page, 1)
+    print("Picking up part...")
+
     pos = sim.getObjectPosition(ikTip, -1)
     quat = sim.getObjectQuaternion(ikTip, -1)
 
@@ -159,10 +203,12 @@ while droppedPartsCnt < 6:
         ikMaxVel,
         ikMaxAccel,
         ikMaxJerk,
-        [pos[0] + 0.105, pos[1], pos[2]],
+        [pos[0] + 0.5, pos[1], pos[2]],
         quat,
         None,
     )
+
+    print("Gripping part...")
 
     set_gripper_data(False)
     sim.wait(0.5)
@@ -181,8 +227,7 @@ while droppedPartsCnt < 6:
         None,
     )
 
-    enable_ik(False)
-    sim.setInt32Param(sim.intparam_current_page, 0)
+    print("Moving to drop location...")
 
     sim.rmlMoveToJointPositions(
         jointHandles,
@@ -196,7 +241,11 @@ while droppedPartsCnt < 6:
         targetVel,
     )
 
-    sim.setInt32Param(sim.intparam_current_page, 2)
+    print("Dropping part...")
+
+    while True:
+        client.step()
+
     enable_ik(True)
     pos = sim.getObjectPosition(ikTip, -1)
     quat = sim.getObjectQuaternion(ikTip, -1)
