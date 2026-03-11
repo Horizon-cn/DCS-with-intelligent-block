@@ -6,6 +6,7 @@ from control.tasks import SimpleMoveTask, MoveToTargetTask
 from control.plan import motionplan
 from control.move import goto
 from config import cfg
+from control.grasp import grasp_obj, drop_obj
 
 def main():
 
@@ -18,6 +19,11 @@ def main():
 
     task = SimpleMoveTask(cfg["sim"]["switch_period_s"], cfg["sim"]["delta_per_step"])
     UR5_1 = sim.getObject(robot_paths["UR5_1"])
+    ikTip = sim.getObject("/UR5_1/UR5_ikTip")
+    ikTarget = sim.getObject("/UR5_1/UR5_ikTarget")
+    modelBase = UR5_1
+    modelName = sim.getObjectName(modelBase)
+    
     delta_per_step = cfg["sim"]["delta_per_step"]
 
     blocks = {name: sim.getObject(path) for name, path in block_paths.items()}
@@ -42,17 +48,20 @@ def main():
         task.setup([5, 5, 0], sim, UR5_1)
         task.begin(client, sim, UR5_1)
 
-        task.setup([7.75, 1.5, 0], sim, UR5_1)
-        task.begin(client, sim, UR5_1)
+        for i in range(6):
+            task.setup([7.75, 1.5-0.1*i, 0], sim, UR5_1)
+            task.begin(client, sim, UR5_1)
+            grasp_obj(sim, f"Cuboid_{i+1}")
 
-        time.sleep(1)  # 延迟1秒
+            time.sleep(1)  # 延迟1秒
 
-        task.setup([7.75, 1, 0], sim, UR5_1)
-        task.begin(client, sim, UR5_1)
+            task.setup([5, 1-0.1*i, 0], sim, UR5_1)
+            task.begin(client, sim, UR5_1)
+            drop_obj(sim, [4.5, 1-0.1*i, 0.1])
 
-        time.sleep(1)  # 延迟1秒
+            time.sleep(1)  # 延迟1秒
 
-        task.setup([4, 4, 0], sim, UR5_1)
+        task.setup([5, 5, 0], sim, UR5_1)
         task.begin(client, sim, UR5_1)
 
     except KeyboardInterrupt:

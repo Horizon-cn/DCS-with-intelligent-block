@@ -38,6 +38,8 @@ modelBase = sim.getObject("/UR5_1")
 modelName = sim.getObjectName(modelBase)
 blocks = {name: sim.getObject(path) for name, path in block_paths.items()}
 
+sim.setObjectPosition(ikTarget, -1, [5, 5, 0.6])
+
 # Set up some of the RML vectors.
 vel = 180
 accel = 40
@@ -124,15 +126,28 @@ for k in range(cfg["run"]["max_steps"]):
 #task2.begin(client, sim, ikTarget)
 #print("done")
 
-sim.setObjectOrientation(modelBase, sim.handle_world, [0.0, 0.0, math.pi])
+#sim.setObjectOrientation(modelBase, sim.handle_world, [0.0, 0.0, math.pi])
+ur5_pos = sim.getObjectPosition(modelBase, -1)
+sim.rmlMoveToPosition(
+        modelBase,
+        -1,
+        -1,
+        None,
+        None,
+        ikMaxVel,
+        ikMaxAccel,
+        ikMaxJerk,
+        [ur5_pos[0], ur5_pos[1], ur5_pos[2]],
+        [0.0, 0.0, 1.0, 0.0],
+        None,
+    )
 
 set_gripper_data(True)
-sim.wait(1)
+sim.wait(2)
 #sim.setObjectOrientation(ikTarget, sim.handle_world, [math.radians(90), math.radians(-5), math.radians(100)])
 #sim.setObjectOrientation(ikTip, sim.handle_world, [math.radians(90), math.radians(-5), math.radians(100)])
 
 while True:
-    pos = sim.getObjectPosition(ikTip, -1)
 
     sim.rmlMoveToPosition(
         ikTarget,
@@ -143,7 +158,7 @@ while True:
         ikMaxVel,
         ikMaxAccel,
         ikMaxJerk,
-        [-0.50158, -0.02511, +0.11163],
+        [-0.50158, -0.02511, 0.04],
         [-0.5, 0.5, -0.5, -0.5],
         None,
     )

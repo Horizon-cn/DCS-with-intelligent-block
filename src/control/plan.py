@@ -26,5 +26,5 @@ def motionplan(sim, obj, map_, target_pos):
     #vis.close()
 
     world_path = to_world(path)
-    print(world_path)
+    #print(world_path)
     return world_path

@@ -46,6 +46,18 @@ def get_all_block_paths(cfg):
     """
     return {obj["name"]: obj["path"] for obj in cfg.get("objects", []) if obj.get("type") == "block"}
 
+def get_all_cuboid_paths(cfg):
+    """
+    获取所有立方体对象的路径字典
+    
+    Args:
+        cfg: 配置字典
+        
+    Returns:
+        dict: {name: path} 格式的字典
+    """
+    return {obj["name"]: obj["path"] for obj in cfg.get("objects", []) if obj.get("type") == "cuboid"}
+
 
 def get_objects_by_type(cfg, obj_type):
     """
