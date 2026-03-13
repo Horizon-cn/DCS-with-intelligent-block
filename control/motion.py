@@ -144,7 +144,7 @@ def unglue(glue_cid: int | None, body_a: int | None = None, body_b: int | None =
         p.setCollisionFilterPair(body_a, body_b, -1, -1, 1)
 
 class MoveToTargetTask:
-    def __init__(self, cube_stacks, delta_per_step=0.0005):
+    def __init__(self, cube_stacks, cube_picked, delta_per_step=0.0005):
         self.reached = False
         self.stepsize = delta_per_step
 
@@ -153,6 +153,8 @@ class MoveToTargetTask:
         stacks_iter = cube_stacks.values() if hasattr(cube_stacks, "values") else cube_stacks
         for cubes in stacks_iter:
             for cube in cubes:
+                if cube_picked.get(cube, True):
+                    continue
                 pos = p.getBasePositionAndOrientation(cube)[0]
                 aabb_min, aabb_max = p.getAABB(cube)
                 size = [

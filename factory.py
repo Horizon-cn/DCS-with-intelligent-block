@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from control.motion import *
 from control.move import *
 
+
+
 def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
     visual_shape_id = p.createVisualShape(
         shapeType=p.GEOM_MESH,
@@ -107,6 +109,7 @@ def create_robot(
 @dataclass
 class rob_info:
     robot_id: int
+    cube_picked: dict[int, bool]
     has_load: bool = False
     load_cube_id: int | None = None
     glue_cid: int | None = None
@@ -119,6 +122,7 @@ class rob_info:
         self.load_cube_id = cube_id
         pickup_cube(self.load_cube_id, self.robot_id)
         self.glue_to_cube(cube_id)
+        self.cube_picked[self.load_cube_id] = True
 
     def drop(self, obj_dict: dict) -> None:
         if self.load_cube_id is None:
@@ -129,6 +133,7 @@ class rob_info:
             unglue(self.glue_cid, self.robot_id, self.load_cube_id)
 
         drop_cube(self.load_cube_id, self.robot_id, obj_dict)
+        self.cube_picked[self.load_cube_id] = False
         self.has_load = False
         self.load_cube_id = None
         self.glue_cid = None
@@ -137,7 +142,7 @@ class rob_info:
         rotate_base(self.robot_id, angle)
 
     def move_to(self, target_pos: List[float], cube_stacks, delta_per_step: float = 0.002) -> None:
-        task = MoveToTargetTask(cube_stacks, delta_per_step=delta_per_step)
+        task = MoveToTargetTask(cube_stacks, self.cube_picked, delta_per_step=delta_per_step)
         task.setup(target_pos, self.robot_id)
         task.begin(self.robot_id)
         

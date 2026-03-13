@@ -10,7 +10,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "time_step": 1.0 / 240.0,
         "solver_iterations": 10,
         "use_maximal_coordinates": True,
-        "settle_steps": 400,
+        "settle_steps": 200,
         "post_move_steps": 500,
         "scaling_factor": 20.0
     },
