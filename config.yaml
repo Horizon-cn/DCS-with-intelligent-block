@@ -3,7 +3,7 @@ simulation:
   time_step: 0.004166666666666667  # 1/240
   solver_iterations: 10
   use_maximal_coordinates: true
-  settle_steps: 1000
+  settle_steps: 80
   post_move_steps: 6000
 
 plane:
@@ -23,7 +23,7 @@ robot:
   mesh_file: "cube.obj"
   visual_rgba: [0.8, 0.2, 0.2, 1]
   visual_specular: [0.4, 0.4, 0]
-  frame_shift: [0, -0.02, 0]
+  frame_shift: [0, 0, 0]
   robot_scale: [1, 1, 0.4]
   mass: 5.0
   lateral_friction: 1.0

@@ -1,6 +1,7 @@
 import time
 import pybullet as p
 import python_motion_planning as pmp
+import math
 
 from factory import *
 from config_loader import load_config
@@ -38,7 +39,7 @@ def main() -> None:
                 cfg["cube"],
                 cfg["stack"],
                 sim_cfg["use_maximal_coordinates"],
-                [8, y, 0],
+                [8, y*1.1, 0.1],
             )
         )
 
@@ -77,17 +78,18 @@ def main() -> None:
 
     for i in range(len(cube_stacks)):
         j = 0
-        while get_top_cube(cube_stacks[i]):
-            top_cube = get_top_cube(cube_stacks[i])
+        while j < len(cube_stacks[i]):
+            top_cube = cube_stacks[i][-1-j]
             robots_info[0].pick_up(top_cube)
 
             step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
 
-            robots_info[0].rotate(3.14)
-            robots_info[0].move_to([20-i, 20-j, 0], cube_stacks)
+            robots_info[0].rotate(0)
+            robots_info[0].move_to([20+i*1.1, 20+j*1.1, 0], cube_stacks)
+            robots_info[0].rotate(math.pi)
             robots_info[0].drop(obj_dict)
-            robots_info[0].rotate(3.14)
-            robots_info[0].move_to([9.5, 1+i, 0], cube_stacks)
+            step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
+            robots_info[0].move_to([9.5, 1+i*1.1, 0], cube_stacks)
             j+=1
 
     #top_cube1 = get_top_cube(cube_stacks[0])
@@ -96,9 +98,9 @@ def main() -> None:
     #robots_info[1].pick_up(top_cube2)
 
     #step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
-    #robots_info[0].rotate(3.14)
+    #robots_info[0].rotate(math.pi)
     #robots_info[0].drop(obj_dict)
-    #robots_info[0].rotate(-3.14/2)
+    #robots_info[0].rotate(-math.pi/2)
     #robots_info[0].move_to([20, 20, 0], cube_stacks)
 
     step_simulation(sim_cfg["post_move_steps"], sim_cfg["time_step"])

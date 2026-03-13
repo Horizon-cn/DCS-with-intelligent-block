@@ -170,7 +170,7 @@ class MoveToTargetTask:
                     
                 self.map.type_map[x_min:x_max+1, y_min:y_max+1] = TYPES.OBSTACLE
 
-        self.map.inflate_obstacles(radius=10)    
+        self.map.inflate_obstacles(radius=15)    
 
     def setup(self, target_pos, robot_id):
         self.target_pos = target_pos

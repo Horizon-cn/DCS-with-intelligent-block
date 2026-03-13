@@ -139,7 +139,7 @@ class rob_info:
         self.glue_cid = None
     
     def rotate(self, angle: float) -> None:
-        rotate_base(self.robot_id, angle)
+        rotate_to(self.robot_id, angle)
 
     def move_to(self, target_pos: List[float], cube_stacks, delta_per_step: float = 0.002) -> None:
         task = MoveToTargetTask(cube_stacks, self.cube_picked, delta_per_step=delta_per_step)

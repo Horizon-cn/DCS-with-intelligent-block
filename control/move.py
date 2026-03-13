@@ -5,6 +5,10 @@ from config_loader import load_config
 
 cfg = load_config()
 
+
+def _normalize_angle(angle: float) -> float:
+    return (angle + 3.141592653589793) % (2 * 3.141592653589793) - 3.141592653589793
+
 def smoothstep(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
@@ -26,32 +30,34 @@ def step(sim, obj, axis_index, delta):
     sim.setObjectPosition(obj, -1, p)
     return p
 
-def goto(robot_id: int, target_pos: list[float], speed: float = 0.05, tolerance: float = 0.01):
+def goto(robot_id: int, target_pos: list[float], speed: float = 0.005, tolerance: float = 0.01):
     """
-    每次调用向目标位置前进一步（稳定速度）
+    每次调用为下一帧设置匀速速度，使机器人连续朝目标移动
     
     Args:
         robot_id: 机器人刚体 id
         target_pos: 目标位置 [x, y, z]
-        speed: 每步移动的最大距离（速度）
+        speed: 每个仿真步允许前进的最大距离
         tolerance: 到达目标的容差（距离阈值）
         
     Returns:
         tuple: (是否到达, 当前位置)
     """
+    time_step = 1/2400
     cur_pos = p.getBasePositionAndOrientation(robot_id)[0]
     direction = [target_pos[i] - cur_pos[i] for i in range(3)]
     distance = sum(d**2 for d in direction) ** 0.5
     
     if distance <= tolerance:
+        p.resetBaseVelocity(robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
         return (True, cur_pos)
     
-    step = [d / distance * min(speed, distance) for d in direction]
-    new_pos = [cur_pos[i] + step[i] for i in range(3)]
-    _, cur_orn = p.getBasePositionAndOrientation(robot_id)
-    p.resetBasePositionAndOrientation(robot_id, new_pos, cur_orn)
+    step_distance = min(speed, distance)
+    linear_speed = step_distance / time_step
+    velocity = [d / distance * linear_speed for d in direction]
+    p.resetBaseVelocity(robot_id, linearVelocity=velocity, angularVelocity=[0, 0, 0])
     
-    return (False, new_pos)
+    return (False, cur_pos)
 
 def move_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: float) -> None:
     start_pos, start_orn = p.getBasePositionAndOrientation(obj)
@@ -99,6 +105,7 @@ def rotate_base(base_id: int, angle: float) -> None:
     rotate_time_step = sim_cfg["time_step"]
 
     start_pos, start_orn = p.getBasePositionAndOrientation(base_id)
+    p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
 
     for i in range(rotate_steps):
         t = (i + 1) / rotate_steps
@@ -106,5 +113,26 @@ def rotate_base(base_id: int, angle: float) -> None:
         delta_orn = p.getQuaternionFromEuler([0, 0, -angle * s])
         _, orn = p.multiplyTransforms([0, 0, 0], start_orn, [0, 0, 0], delta_orn)
         p.resetBasePositionAndOrientation(base_id, start_pos, orn)
+        p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+        p.stepSimulation()
+        time.sleep(rotate_time_step)
+
+def rotate_to(base_id: int, target_angle: float) -> None:
+    sim_cfg = cfg["simulation"]
+    motion_cfg = cfg["motion"]
+    rotate_steps = motion_cfg["move_steps"]
+    rotate_time_step = sim_cfg["time_step"]
+
+    start_pos, start_orn = p.getBasePositionAndOrientation(base_id)
+    roll, pitch, start_yaw = p.getEulerFromQuaternion(start_orn)
+    delta_angle = _normalize_angle(target_angle - start_yaw)
+
+    for i in range(rotate_steps):
+        t = (i + 1) / rotate_steps
+        s = smoothstep(t)
+        current_angle = start_yaw + delta_angle * s
+        current_orn = p.getQuaternionFromEuler([0, 0, current_angle])
+        p.resetBasePositionAndOrientation(base_id, start_pos, current_orn)
+        p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
         p.stepSimulation()
         time.sleep(rotate_time_step)
