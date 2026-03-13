@@ -1,9 +1,10 @@
 import time
 import pybullet as p
+import python_motion_planning as pmp
 
 from factory import *
 from config_loader import load_config
-from motion import *
+from control.motion import get_top_cube
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
 
 
@@ -27,57 +28,58 @@ def main() -> None:
     plane_id = create_plane(cfg["plane"], sim_cfg["use_maximal_coordinates"])
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
-    cubes = create_cube_stack(
-        cubev_shape_id,
-        cubec_shape_id,
-        cfg["cube"],
-        cfg["stack"],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    cube_1 = create_cube(
-        cubev_shape_id,
-        cubec_shape_id,
-        cfg["cube"],
-        [2, 2, 2],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    cubes.append(cube_1)
+    cube_stacks = []
+    for y in range(1, 6):
+        cube_stacks.append(
+            create_cube_stack(
+                cubev_shape_id,
+                cubec_shape_id,
+                cfg["cube"],
+                cfg["stack"],
+                sim_cfg["use_maximal_coordinates"],
+                [8, y, 0],
+            )
+        )
 
     robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
     robot1_id = create_robot(
         robv_shape_id,
         robc_shape_id,
         cfg["robot"],
-        [2,2,1],
+        [9.5,1,1],
         sim_cfg["use_maximal_coordinates"],
     )
-    robots_info.append(rob_info(robot_id=robot1_id, has_load=True, load_cube_id=cube_1))
+    robots_info.append(rob_info(robot_id=robot1_id))
     rob_num+=1
 
-    robot2_id = create_robot(
-        robv_shape_id,
-        robc_shape_id,
-        cfg["robot"],
-        [-2,-2,1],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    robots_info.append(rob_info(robot_id=robot2_id))
-    rob_num+=1
+    # robot2_id = create_robot(
+    #     robv_shape_id,
+    #     robc_shape_id,
+    #     cfg["robot"],
+    #     [9.5,3,1],
+    #     sim_cfg["use_maximal_coordinates"],
+    # )
+    # robots_info.append(rob_info(robot_id=robot2_id))
+    # rob_num+=1
 
     obj_dict["plane"] = plane_id
-    obj_dict["cubes"] = cubes
+    #obj_dict["cubes"] = cubes
     
 
     configure_visualizer(cfg["visualizer"], enable_rendering=True)
+    step_simulation(600, sim_cfg["time_step"])
+
+
+    top_cube1 = get_top_cube(cube_stacks[0])
+    #top_cube2 = get_top_cube(cube_stacks[1])
+    robots_info[0].pick_up(top_cube1)
+    #robots_info[1].pick_up(top_cube2)
+
     step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
-
-    robots_info[0].glue_to_cube(cube_1)
-
-    top_cube = get_top_cube(cubes)
-    robots_info[1].pick_up(top_cube, obj_dict)
-
-    step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
+    robots_info[0].rotate(3.14/2)
     robots_info[0].drop(obj_dict)
+    robots_info[0].rotate(-3.14/2)
+    robots_info[0].move_to([20, 20, 0], cube_stacks)
 
     step_simulation(sim_cfg["post_move_steps"], sim_cfg["time_step"])
     

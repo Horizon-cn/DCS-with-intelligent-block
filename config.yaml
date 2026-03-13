@@ -34,7 +34,7 @@ stack:
   z_spacing: 4
 
 motion:
-  x_offset: 1.0
+  x_offset: 1.5
   move_steps: 480
 
 visualizer:

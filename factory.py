@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import List
 import pybullet as p
 from dataclasses import dataclass
-from motion import *
+from control.motion import *
+from control.move import *
 
 def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
     visual_shape_id = p.createVisualShape(
@@ -47,10 +48,11 @@ def create_cube_stack(
     cube_cfg: dict,
     stack_cfg: dict,
     use_maximal_coordinates: bool,
+    base_pos: List[float] | None = None,
 ) -> List[int]:
     cubes: List[int] = []
     count = stack_cfg["count"]
-    base_pos = stack_cfg["base_position"]
+    base_pos = base_pos if base_pos is not None else stack_cfg["base_position"]
     z_spacing = stack_cfg["z_spacing"]
 
     for i in range(count):
@@ -112,10 +114,10 @@ class rob_info:
     def glue_to_cube(self, cube_id: int) -> None:
         self.glue_cid = try_glue(self.robot_id, cube_id)
 
-    def pick_up(self, cube_id: int, obj_dict: dict) -> None:
+    def pick_up(self, cube_id: int) -> None:
         self.has_load = True
         self.load_cube_id = cube_id
-        pickup_cube(self.load_cube_id, self.robot_id, obj_dict)
+        pickup_cube(self.load_cube_id, self.robot_id)
         self.glue_to_cube(cube_id)
 
     def drop(self, obj_dict: dict) -> None:
@@ -130,4 +132,12 @@ class rob_info:
         self.has_load = False
         self.load_cube_id = None
         self.glue_cid = None
+    
+    def rotate(self, angle: float) -> None:
+        rotate_base(self.robot_id, angle)
+
+    def move_to(self, target_pos: List[float], cube_stacks, delta_per_step: float = 0.002) -> None:
+        task = MoveToTargetTask(cube_stacks, delta_per_step=delta_per_step)
+        task.setup(target_pos, self.robot_id)
+        task.begin(self.robot_id)
         

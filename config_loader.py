@@ -11,7 +11,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "solver_iterations": 10,
         "use_maximal_coordinates": True,
         "settle_steps": 400,
-        "post_move_steps": 1000,
+        "post_move_steps": 500,
+        "scaling_factor": 20.0
     },
     "plane": {
         "urdf": "plane100.urdf",
@@ -36,12 +37,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "lateral_friction": 1.0,
     },
     "stack": {
-        "count": 3,
+        "count": 5,
         "base_position": [0, 0, 1],
-        "z_spacing": 4,
+        "z_spacing": 1,
     },
     "motion": {
-        "x_offset": 1.01,
+        "x_offset": 1.5,
         "move_steps": 480,
     },
     "visualizer": {

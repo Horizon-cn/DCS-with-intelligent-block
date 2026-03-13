@@ -1,13 +1,12 @@
 from __future__ import annotations
-import time
 import pybullet as p
+from python_motion_planning import *
 from config_loader import load_config
+from control.move import goto, move_dir, move_tar
+from control.plan import Grid, motionplan
 
 cfg = load_config()
-
-
-def smoothstep(t: float) -> float:
-    return t * t * (3.0 - 2.0 * t)
+scaling_factor = cfg["simulation"]["scaling_factor"]
 
 
 def get_top_cube(cubes: list[int]) -> int:
@@ -28,49 +27,11 @@ def _set_collision_with_all(body_id: int, enabled: bool) -> None:
             p.setCollisionFilterPair(body_id, other_id, -1, -1, flag)
 
 
-def move_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: float) -> None:
-    start_pos, start_orn = p.getBasePositionAndOrientation(obj)
-
-    # Forward is robot local +X axis; convert it into world coordinates.
-    rot = p.getMatrixFromQuaternion(robot_orn)
-    forward = [rot[0], rot[3], rot[6]]
-    target_pos = [
-        start_pos[0] + offset * forward[0],
-        start_pos[1] + offset * forward[1],
-        start_pos[2] + offset * forward[2],
-    ]
-
-    for i in range(move_steps):
-        t = (i + 1) / move_steps
-        s = smoothstep(t)
-        pos = [
-            start_pos[0] + (target_pos[0] - start_pos[0]) * s,
-            start_pos[1] + (target_pos[1] - start_pos[1]) * s,
-            start_pos[2] + (target_pos[2] - start_pos[2]) * s,
-        ]
-        p.resetBasePositionAndOrientation(obj, pos, start_orn)
-        p.stepSimulation()
-        time.sleep(time_step)
-
-def move_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
-    start_pos, _ = p.getBasePositionAndOrientation(obj_id)
-    for i in range(steps):
-        t = (i + 1) / steps
-        s = smoothstep(t)
-        pos = [
-            start_pos[0] + (target_pos[0] - start_pos[0]) * s,
-            start_pos[1] + (target_pos[1] - start_pos[1]) * s,
-            start_pos[2] + (target_pos[2] - start_pos[2]) * s,
-        ]
-        p.resetBasePositionAndOrientation(obj_id, pos, orn)
-        p.stepSimulation()
-        time.sleep(time_step)
-
 
 def reset_cube_velocity(obj: int) -> None:
     p.resetBaseVelocity(obj, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
 
-def pickup_cube(cubeid: int, robotid: int, obj_dicts: dict) -> None:
+def pickup_cube(cubeid: int, robotid: int) -> None:
     sim_cfg = cfg["simulation"]
     move_steps = cfg["motion"]["move_steps"]
     time_step = sim_cfg["time_step"]
@@ -181,3 +142,64 @@ def unglue(glue_cid: int | None, body_a: int | None = None, body_b: int | None =
     p.removeConstraint(glue_cid)
     if body_a is not None and body_b is not None:
         p.setCollisionFilterPair(body_a, body_b, -1, -1, 1)
+
+class MoveToTargetTask:
+    def __init__(self, cube_stacks, delta_per_step=0.0005):
+        self.reached = False
+        self.stepsize = delta_per_step
+
+        self.map = Grid(bounds=[[0, 1600], [0, 1600]])
+        self.map.fill_boundary_with_obstacles()
+        stacks_iter = cube_stacks.values() if hasattr(cube_stacks, "values") else cube_stacks
+        for cubes in stacks_iter:
+            for cube in cubes:
+                pos = p.getBasePositionAndOrientation(cube)[0]
+                aabb_min, aabb_max = p.getAABB(cube)
+                size = [
+                    aabb_max[0] - aabb_min[0],  # x 方向长度
+                    aabb_max[1] - aabb_min[1],  # y 方向长度
+                    aabb_max[2] - aabb_min[2],  # z 方向长度
+                ]
+                x_min = int(round((pos[0] - size[0]/2) * scaling_factor))
+                x_max = int(round((pos[0] + size[0]/2) * scaling_factor))
+                y_min = int(round((pos[1] - size[1]/2) * scaling_factor))
+                y_max = int(round((pos[1] + size[1]/2) * scaling_factor))
+                print(f"Marking grid cells from ({x_min}, {y_min}) to ({x_max}, {y_max}) as obstacles")
+                    
+                self.map.type_map[x_min:x_max+1, y_min:y_max+1] = TYPES.OBSTACLE
+
+        self.map.inflate_obstacles(radius=10)    
+
+    def setup(self, target_pos, robot_id):
+        self.target_pos = target_pos
+        self.reached = False
+        self.tragetory = motionplan(robot_id, self.map, self.target_pos)
+        self.current_i = 0
+        # Path planning is 2D, so keep the robot at its current height.
+        self.cruise_z = p.getBasePositionAndOrientation(robot_id)[0][2]
+
+    def reset(self, t0: float):
+        self.reached = False
+
+    def begin(self, robot_id: int) -> None:
+        if not self.tragetory:
+            print(f"Warning: Empty trajectory, target {self.target_pos} unreachable")
+            self.reached = True
+            return
+            
+        while not self.reached:
+            current_pos = p.getBasePositionAndOrientation(robot_id)[0]
+            target_2d = self.tragetory[self.current_i]
+            # Expand 2D waypoint to 3D while preserving robot base height.
+            target_3d = [target_2d[0], target_2d[1], self.cruise_z]
+            
+            # Reach check in XY only; Z is intentionally held constant.
+            if all(abs(current_pos[i] - target_3d[i]) < 0.01 for i in range(2)):
+                self.current_i += 1
+                if self.current_i >= len(self.tragetory):
+                    self.reached = True
+            else:
+                while not goto(robot_id, target_3d, speed=self.stepsize)[0]:
+                    p.stepSimulation()
+
+        return
