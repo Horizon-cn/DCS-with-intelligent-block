@@ -13,6 +13,12 @@ NORM = {
     "+Z": (0, 0, 1), "-Z": (0, 0, -1),
 }
 
+OPPOSITE_FACE = {
+    "+X": "-X", "-X": "+X",
+    "+Y": "-Y", "-Y": "+Y",
+    "+Z": "-Z", "-Z": "+Z",
+}
+
 # For each face, the 4 in-plane edge directions (orthogonal to the face normal)
 EDGE_DIRS = {
     "+X": [(0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)],
@@ -23,7 +29,18 @@ EDGE_DIRS = {
     "-Z": [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0)],
 }
 
-Node = Tuple[Tuple[int, int, int], str]  # ((x,y,z), face)
+@dataclass(frozen=True)
+class Node:
+    """A planning node: free-cell center position + direction toward an adjacent obstacle surface."""
+    pos: Tuple[float, float, float]
+    face_dir: str
+
+    def __hash__(self):
+        # Same position is the same planning point regardless of face direction.
+        return hash(self.pos)
+
+    def __eq__(self, other):
+        return isinstance(other, Node) and self.pos == other.pos
 
 
 class LazyPQ:
@@ -99,18 +116,39 @@ class DStarLiteSurface3D:
     def addv(self, a, b):
         return (a[0]+b[0], a[1]+b[1], a[2]+b[2])
 
+    def idx_to_center(self, v: Tuple[int, int, int]) -> Tuple[float, float, float]:
+        return (v[0] + 0.5, v[1] + 0.5, v[2] + 0.5)
+
+    def center_to_idx(self, p: Tuple[float, float, float]) -> Tuple[int, int, int]:
+        return (int(round(p[0] - 0.5)), int(round(p[1] - 0.5)), int(round(p[2] - 0.5)))
+
+    def available_face_dirs(self, free_v: Tuple[int, int, int]) -> List[str]:
+        """Directions from free_v center toward adjacent obstacle surfaces."""
+        if not self.in_bounds(free_v) or self.occ_at(free_v) != 0:
+            return []
+
+        dirs = []
+        for f in FACES:
+            obs_v = self.addv(free_v, NORM[f])
+            if self.in_bounds(obs_v) and self.occ_at(obs_v) == 1:
+                dirs.append(f)
+        return dirs
+
     # --- node validity: exposed face of an obstacle voxel ---
     def valid_node(self, node: Node) -> bool:
-        v, f = node
-        if not self.in_bounds(v): return False
-        if self.occ_at(v) != 1: return False
-        u = self.addv(v, NORM[f])
-        if not self.in_bounds(u): return False
-        return self.occ_at(u) == 0  # exposed
+        if node.face_dir not in FACES:
+            return False
+        u = self.center_to_idx(node.pos)
+        if not self.in_bounds(u):
+            return False
+        if self.occ_at(u) != 0:
+            return False
+        obs_v = self.addv(u, NORM[node.face_dir])
+        return self.in_bounds(obs_v) and self.occ_at(obs_v) == 1
 
     # --- heuristic (safe lower bound) ---
     def h(self, a: Node, b: Node) -> int:
-        (va, _), (vb, _) = a, b
+        va, vb = self.center_to_idx(a.pos), self.center_to_idx(b.pos)
         return abs(va[0]-vb[0]) + abs(va[1]-vb[1]) + abs(va[2]-vb[2])
 
     def key(self, s: Node):
@@ -121,44 +159,47 @@ class DStarLiteSurface3D:
 
     # --- successors on the surface graph (1B/2A) ---
     def successors(self, node: Node) -> List[Node]:
-        v, f = node
+        u = self.center_to_idx(node.pos)
         out: List[Node] = []
 
-        # A) turn on the same obstacle voxel around an edge: to orthogonal faces (4 candidates)
-        for f2 in FACES:
-            if f2 == f: 
+        # At a point, all available face directions can be used for next-step expansion.
+        usable_dirs = self.available_face_dirs(u)
+        if not usable_dirs:
+            return out
+
+        # Slide on free layer along in-plane edge directions of each usable face.
+        for d_face in usable_dirs:
+            for step_d in EDGE_DIRS[d_face]:
+                u2 = self.addv(u, step_d)
+                if not self.in_bounds(u2) or self.occ_at(u2) != 0:
+                    continue
+
+                for d2 in self.available_face_dirs(u2):
+                    if not self.visited[u2[0]][u2[1]][u2[2]]:
+                        out.append(Node(self.idx_to_center(u2), d2))
+
+        # Edge flip: move around a right-angle edge of the same obstacle voxel
+        # from face d_face to an orthogonal face f2.
+        for d_face in usable_dirs:
+            obs_v = self.addv(u, NORM[d_face])
+            if not self.in_bounds(obs_v) or self.occ_at(obs_v) != 1:
                 continue
-            # orthogonal: dot(n(f), n(f2)) == 0
-            n1 = NORM[f]
-            n2 = NORM[f2]
-            if n1[0]*n2[0] + n1[1]*n2[1] + n1[2]*n2[2] != 0:
-                continue
-            nnode = (v, f2)
-            adr = self.addv(v, NORM[f2])  # adjacent free voxel in direction of new face
-            if self.valid_node(nnode) and not self.visited[adr[0]][adr[1]][adr[2]]:  # optional: prefer already visited faces to reduce branching
-                out.append(nnode)
 
-        # B) switch to another obstacle face via free-layer edge move
-
-        u = self.addv(v, NORM[f])      # free voxel adjacent to current face
-        # if not self.in_bounds(u) or self.occ_at(u) != 0:
-        #     return out  # should not happen if valid_node, but keep safe
-
-        for d in EDGE_DIRS[f]:
-            u2 = self.addv(u, d)
-            if not self.in_bounds(u2): 
-                continue
-            if self.occ_at(u2) != 0:
-                continue  # must stay in free layer while sliding
-
-            # At u2, we can "attach" to any obstacle voxel adjacent to u2
-            # by choosing a face f2 whose outward neighbor is u2.
+            n1 = NORM[d_face]
             for f2 in FACES:
-                v2 = self.addv(u2, (-NORM[f2][0], -NORM[f2][1], -NORM[f2][2]))  # v2 = u2 - n(f2)
-                nnode = (v2, f2)
-                adr = self.addv(v2, NORM[f2])  # adjacent free voxel in direction of new face
-                if self.valid_node(nnode) and not self.visited[adr[0]][adr[1]][adr[2]]:  # optional: prefer already visited faces to reduce branching
-                    out.append(nnode)
+                if f2 == d_face:
+                    continue
+                n2 = NORM[f2]
+                if n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] != 0:
+                    continue  # only orthogonal faces share a right-angle edge
+
+                # free cell adjacent to same obstacle voxel on face f2
+                u2 = (obs_v[0] - n2[0], obs_v[1] - n2[1], obs_v[2] - n2[2])
+                if not self.in_bounds(u2) or self.occ_at(u2) != 0:
+                    continue
+                if f2 in self.available_face_dirs(u2):
+                    if not self.visited[u2[0]][u2[1]][u2[2]]:
+                        out.append(Node(self.idx_to_center(u2), f2))
 
         # Optional: deduplicate (important when many candidates)
         # keep stable order
@@ -173,7 +214,11 @@ class DStarLiteSurface3D:
     def cost(self, a: Node, b: Node) -> int:
         # all moves cost 1 (your requirement)
         # If b is invalid, treat as blocked
-        return 1 if self.valid_node(b) else INF
+        if not self.valid_node(b):
+            return INF
+        if a.pos == b.pos:
+            return INF
+        return 1
 
     # --- D* Lite core routines ---
     def update_vertex(self, u: Node):
@@ -231,23 +276,23 @@ class DStarLiteSurface3D:
         Practical approach for voxel surface graph: update a local candidate set.
         Since updates are 'occasional', local scanning is acceptable.
         """
-        (v, f) = node
+        v = self.center_to_idx(node.pos)
         cand: List[Node] = []
 
-        # candidates on same voxel (all faces)
-        for f2 in FACES:
-            cand.append((v, f2))
+        # Search a local 3x3x3 free-voxel neighborhood to capture slide + edge-flip predecessors.
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    v2 = (v[0] + dx, v[1] + dy, v[2] + dz)
+                    if not self.in_bounds(v2) or self.occ_at(v2) != 0:
+                        continue
+                    for f2 in self.available_face_dirs(v2):
+                        c = Node(self.idx_to_center(v2), f2)
+                        if self.valid_node(c):
+                            cand.append(c)
 
-        # candidates from neighboring obstacle voxels around v (6 neighbors, all faces)
-        for dv in [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]:
-            v2 = self.addv(v, dv)
-            if self.in_bounds(v2):
-                for f2 in FACES:
-                    cand.append((v2, f2))
-
-        # filter valid
-        out = [c for c in cand if self.valid_node(c)]
-        # dedup
+        # Keep only true predecessors according to current successor model.
+        out = [c for c in cand if node in self.successors(c)]
         return list(dict.fromkeys(out))
 
     # --- usage helpers ---
@@ -261,6 +306,8 @@ class DStarLiteSurface3D:
         best = INF
         best_s = None
         for s in self.successors(self.start):
+            if s.pos == self.start.pos:
+                continue
             c = self.cost(self.start, s)
             val = c + self.g.get(s, INF)
             if val < best:
@@ -275,10 +322,8 @@ class DStarLiteSurface3D:
         old = self.start
         self.start = new_start
         self.km += self.h(old, new_start)
-        v,f = new_start
-        adr = self.addv(v, NORM[f])
-        self.visited[v[0]][v[1]][v[2]] = True  # book-keeping, not required for algorithm
-         # adjacent free voxel
+        u = self.center_to_idx(new_start.pos)
+        self.visited[u[0]][u[1]][u[2]] = True  # book-keeping, not required for algorithm
 
         self.compute_shortest_path()
 
@@ -297,13 +342,21 @@ class DStarLiteSurface3D:
             if self.in_bounds(vv):
                 affected_voxels.append(vv)
 
-        # update all faces on these voxels (if valid)
+        # update all nearby free-cell points whose available surfaces may change
         affected_nodes: Set[Node] = set()
         for vv in affected_voxels:
-            for f in FACES:
-                n = (vv, f)
-                if self.valid_node(n) or n in self.g or n in self.rhs:
-                    affected_nodes.add(n)
+            if not self.in_bounds(vv):
+                continue
+            if self.occ_at(vv) != 0:
+                continue
+            dirs = self.available_face_dirs(vv)
+            for f in dirs:
+                affected_nodes.add(Node(self.idx_to_center(vv), f))
+
+            # Keep old keys around for cleanup when a point loses all faces.
+            probe = Node(self.idx_to_center(vv), "+X")
+            if probe in self.g or probe in self.rhs:
+                affected_nodes.add(probe)
 
         for n in affected_nodes:
             if self.valid_node(n):
@@ -327,10 +380,8 @@ if __name__ == "__main__":
 
     # ---------- helpers for visualization ----------
     def face_center(node):
-        """Return face center point (x,y,z) in voxel coordinates."""
-        (x, y, z), f = node
-        nx, ny, nz = NORM[f]
-        return (x + 0.5 + 0.5 * nx, y + 0.5 + 0.5 * ny, z + 0.5 + 0.5 * nz)
+        """Node now stores free-cell center directly."""
+        return node.pos
 
     def plot_3d_voxels_and_path(occ, path_nodes, start, goal, title="D* Lite Surface Path"):
         X, Y, Z = occ.shape
@@ -377,23 +428,26 @@ if __name__ == "__main__":
             z = random.randint(1, Z-2)
             occ[x, y, 0:z] = 1
 
-    # Start/Goal are (obstacle voxel, exposed face)
+    # Start/Goal are (free-cell center, direction-to-obstacle-face)
     valid_nodes = []
     for x in range(X):
         for y in range(Y):
             for zc in range(Z):
-                if occ[x, y, zc] != 1:
+                if occ[x, y, zc] != 0:
                     continue
                 for f in FACES:
-                    nx, ny, nz = NORM[f]
-                    ux, uy, uz = x + nx, y + ny, zc + nz
-                    if 0 <= ux < X and 0 <= uy < Y and 0 <= uz < Z and occ[ux, uy, uz] == 0:
-                        valid_nodes.append(((x, y, zc), f))
+                    ox, oy, oz = x + NORM[f][0], y + NORM[f][1], zc + NORM[f][2]
+                    if 0 <= ox < X and 0 <= oy < Y and 0 <= oz < Z and occ[ox, oy, oz] == 1:
+                        valid_nodes.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
 
     if len(valid_nodes) < 2:
         raise RuntimeError("Not enough valid nodes to sample start and goal.")
 
-    start, goal = random.sample(valid_nodes, 2)
+    # Ensure different coordinates (same coordinate is treated as same planning point).
+    while True:
+        start, goal = random.sample(valid_nodes, 2)
+        if start.pos != goal.pos:
+            break
     print(f"Random start={start}, goal={goal}")
 
     planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
