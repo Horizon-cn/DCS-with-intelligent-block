@@ -50,10 +50,11 @@ def create_cube_stack(
     cube_cfg: dict,
     stack_cfg: dict,
     use_maximal_coordinates: bool,
+    z: int | None = None,
     base_pos: List[float] | None = None,
 ) -> List[int]:
     cubes: List[int] = []
-    count = stack_cfg["count"]
+    count = int(z) if z is not None else stack_cfg["count"]
     base_pos = base_pos if base_pos is not None else stack_cfg["base_position"]
     z_spacing = stack_cfg["z_spacing"]
 

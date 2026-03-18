@@ -31,19 +31,22 @@ def main() -> None:
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
     # 2D stack grid: cube_stacks[x][y] -> one stack(list[int]).
-    stack_grid_x = 1
-    stack_grid_y = 5
-    cube_stacks = [[[] for _ in range(stack_grid_y)] for _ in range(stack_grid_x)]
-    for x in range(stack_grid_x):
-        for y in range(stack_grid_y):
+    X, Y, Z = 5, 5, 5
+    occ = np.zeros((X, Y, Z), dtype=np.uint8)
+    cube_stacks = [[[] for _ in range(Y)] for _ in range(X)]
+    for x in range(X):
+        for y in range(Y):
+            z = random.randint(1, Z-2)
             cube_stacks[x][y] = create_cube_stack(
                 cubev_shape_id,
                 cubec_shape_id,
                 cfg["cube"],
                 cfg["stack"],
                 sim_cfg["use_maximal_coordinates"],
-                [(x + 1) * 1.0, (y + 1) * 1.0, 0.1],
+                z=z,
+                base_pos=[(x + 1) * 1.0, (y + 1) * 1.0, 0.1],
             )
+            occ[x, y, 0:z] = 1
 
     # Shared state for all cubes: {cube_id: is_picked}
     for x in range(len(cube_stacks)):
@@ -56,7 +59,7 @@ def main() -> None:
         robv_shape_id,
         robc_shape_id,
         cfg["robot"],
-        [2.5,1,1],
+        [6.5,1,1],
         sim_cfg["use_maximal_coordinates"],
     )
     robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
@@ -94,7 +97,7 @@ def main() -> None:
                 robots_info[0].rotate(math.pi)
                 robots_info[0].drop(obj_dict)
                 step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
-                robots_info[0].move_to([2.5 + x * 1, 1 + y * 1, 0], cube_stacks)
+                robots_info[0].move_to([6.5 + x * 1, 1 + y * 1, 0], cube_stacks)
                 j += 1
 
     #top_cube1 = get_top_cube(cube_stacks[0])
