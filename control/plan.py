@@ -17,16 +17,16 @@ def motionplan(robot_id, map_, target_pos):
 
     start = to_grid(p.getBasePositionAndOrientation(robot_id)[0][:2])
     goal = to_grid(target_pos[:2])
-    print(f"Start: {start}, Goal: {goal}")
+    #print(f"Start: {start}, Goal: {goal}")
     
     planner = AStar(map_=map_, start=start, goal=goal)
     path, path_info = planner.plan()
 
-    #vis = Visualizer2D()
-    #vis.plot_grid_map(map_)
-    #vis.plot_path(path, style="--", color="C4")
-    #vis.show()
-    #vis.close()
+    vis = Visualizer2D()
+    vis.plot_grid_map(map_)
+    vis.plot_path(path, style="--", color="C4")
+    vis.show()
+    vis.close()
 
     world_path = to_world(path)
     #print(world_path)

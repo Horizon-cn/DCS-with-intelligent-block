@@ -182,7 +182,7 @@ class MoveToTargetTask:
                 x_max = int(round((pos[0] + size[0]/2) * scaling_factor))
                 y_min = int(round((pos[1] - size[1]/2) * scaling_factor))
                 y_max = int(round((pos[1] + size[1]/2) * scaling_factor))
-                print(f"Marking grid cells from ({x_min}, {y_min}) to ({x_max}, {y_max}) as obstacles")
+                #print(f"Marking grid cells from ({x_min}, {y_min}) to ({x_max}, {y_max}) as obstacles")
                     
                 self.map.type_map[x_min:x_max+1, y_min:y_max+1] = TYPES.OBSTACLE
 

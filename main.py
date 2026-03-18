@@ -7,6 +7,7 @@ from factory import *
 from config_loader import load_config
 from control.motion import get_top_cube
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
+from control.dstar_surface_3d import *
 
 cube_picked: dict[int, bool] = {}
 
@@ -54,6 +55,22 @@ def main() -> None:
             for cube_id in cube_stacks[x][y]:
                 cube_picked[cube_id] = False
 
+    valid_nodes = []
+    for x in range(X):
+        for y in range(Y):
+            for zc in range(Z):
+                if occ[x, y, zc] != 0:
+                    continue
+                for f in FACES:
+                    ox, oy, oz = x + NORM[f][0], y + NORM[f][1], zc + NORM[f][2]
+                    if 0 <= ox < X and 0 <= oy < Y and 0 <= oz < Z and occ[ox, oy, oz] == 1:
+                        valid_nodes.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
+    
+    while True:
+        start, goal = random.sample(valid_nodes, 2)
+        if start.pos != goal.pos:
+            break
+
     robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
     robot1_id = create_robot(
         robv_shape_id,
@@ -65,22 +82,25 @@ def main() -> None:
     robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
     rob_num+=1
 
-    # robot2_id = create_robot(
-    #     robv_shape_id,
-    #     robc_shape_id,
-    #     cfg["robot"],
-    #     [9.5,3,1],
-    #     sim_cfg["use_maximal_coordinates"],
-    # )
-    # robots_info.append(rob_info(robot_id=robot2_id))
-    # rob_num+=1
+    robot2_id = create_robot(
+        robv_shape_id,
+        robc_shape_id,
+        cfg["robot"],
+        [start.pos[0]+0.5, start.pos[1]+0.5, start.pos[2]],
+        sim_cfg["use_maximal_coordinates"],
+    )
+    robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
+    rob_num+=1
 
     obj_dict["plane"] = plane_id
     #obj_dict["cubes"] = cubes
 
-
     configure_visualizer(cfg["visualizer"], enable_rendering=True)
     step_simulation(600, sim_cfg["time_step"])
+
+    planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
+    path = planner.plan(max_steps=20)
+    planner.plot_3d_voxels_and_path(path)
 
     for x in range(len(cube_stacks)):
         for y in range(len(cube_stacks[x])):

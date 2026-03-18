@@ -88,6 +88,9 @@ class DStarLiteSurface3D:
         self.visited = [[[False for _ in range(self.Z)] for _ in range(self.Y)] for _ in range(self.X)]
         self.start = start
         self.goal = goal
+        # Save original start/goal for visualization (since self.start gets modified during planning)
+        self.start_orig = start
+        self.goal_orig = goal
 
         if not self.valid_node(start):
             raise ValueError(f"start {start} is not a valid exposed obstacle face node.")
@@ -301,6 +304,89 @@ class DStarLiteSurface3D:
         self.compute_shortest_path()
         return self.g.get(self.start, INF) < INF
 
+    def plan(self, max_steps: int = 1000) -> List[Node]:
+        """Plan from current start to goal and return PATH NODES list."""
+        path: List[Node] = []
+        if not self.plan_from_current():
+            return path
+
+        path.append(self.start)
+        for _ in range(max_steps):
+            if self.start == self.goal:
+                break
+
+            ns = self.next_step()
+            if ns is None:
+                break
+
+            self.move_start_to(ns)
+            path.append(self.start)
+
+        return path
+
+    def print_path_nodes(self, path: List[Node]) -> None:
+        """Print detailed path information including nodes, positions, and goal status."""
+        if not path:
+            print("Path is empty.")
+            return
+
+        print("\n--- PATH NODES (voxel, face) ---")
+        for i, n in enumerate(path):
+            print(f"{i:03d}: {n}")
+
+        print("\n--- PATH POINTS (face centers) ---")
+        for i, n in enumerate(path):
+            print(f"{i:03d}: {n.pos}")
+
+        print(f"\nTotal steps: {len(path)}, Hit goal: {self.start == self.goal}")
+
+    def plot_3d_voxels_and_path(self, path: List[Node], title: str = "D* Lite Surface Path") -> None:
+        """Visualize 3D path on voxel grid with obstacles, path, start and goal."""
+        try:
+            import numpy as np
+            import matplotlib.pyplot as plt
+            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+        except ImportError:
+            print("Warning: matplotlib or numpy not available for visualization.")
+            return
+
+        # Convert occupancy grid to boolean
+        occ_np = np.array(self.occ, dtype=bool)
+        
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        ax.set_title(title)
+
+        # --- draw obstacles ---
+        ax.voxels(occ_np, alpha=0.5)
+
+        # --- draw path as line ---
+        if path:
+            pts = np.array([n.pos for n in path], dtype=float)
+            ax.plot(pts[:, 0], pts[:, 1], pts[:, 2])
+            
+            # Draw only intermediate path points (exclude start and goal)
+            if len(path) > 2:
+                pts_mid = np.array([n.pos for n in path[1:-1]], dtype=float)
+                ax.scatter(pts_mid[:, 0], pts_mid[:, 1], pts_mid[:, 2], s=20, alpha=0.6)
+
+        # --- mark original start/goal (use start_orig/goal_orig to preserve original positions) ---
+        sx, sy, sz = self.start_orig.pos
+        gx, gy, gz = self.goal_orig.pos
+        ax.scatter([sx], [sy], [sz], s=80, marker="o", label="start", color="green")  # start
+        ax.scatter([gx], [gy], [gz], s=80, marker="^", label="goal", color="red")  # goal
+
+        # axes limits / labels
+        ax.set_xlim(0, self.X)
+        ax.set_ylim(0, self.Y)
+        ax.set_zlim(0, self.Z)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.legend()
+
+        plt.show()
+
     def next_step(self) -> Optional[Node]:
         """Greedy one-step on surface graph using g-values (like extracting policy)."""
         best = INF
@@ -375,48 +461,7 @@ class DStarLiteSurface3D:
 
 if __name__ == "__main__":
     import numpy as np
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
-    # ---------- helpers for visualization ----------
-    def face_center(node):
-        """Node now stores free-cell center directly."""
-        return node.pos
-
-    def plot_3d_voxels_and_path(occ, path_nodes, start, goal, title="D* Lite Surface Path"):
-        X, Y, Z = occ.shape
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection="3d")
-        ax.set_title(title)
-
-        # --- draw obstacles ---
-        filled = occ.astype(bool)
-        # ax.voxels expects indexing as [x,y,z] if you pass in the same shaped boolean array
-        ax.voxels(filled, alpha=0.5)
-
-        # --- draw path as points (face centers) ---
-        if path_nodes:
-            pts = np.array([face_center(n) for n in path_nodes], dtype=float)
-            ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=20)
-
-            # connect with line for clarity
-            ax.plot(pts[:, 0], pts[:, 1], pts[:, 2])
-
-        # --- mark start/goal ---
-        sx, sy, sz = face_center(start)
-        gx, gy, gz = face_center(goal)
-        ax.scatter([sx], [sy], [sz], s=80, marker="o")  # start
-        ax.scatter([gx], [gy], [gz], s=80, marker="^")  # goal
-
-        # axes limits / labels
-        ax.set_xlim(0, X)
-        ax.set_ylim(0, Y)
-        ax.set_zlim(0, Z)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-
-        plt.show()
+    import random
 
     # ---------- build a demo 3D voxel world ----------
     X, Y, Z = 5, 5, 5
@@ -452,38 +497,12 @@ if __name__ == "__main__":
 
     planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
 
-    ok = planner.plan_from_current()
+    path = planner.plan(max_steps=20)
+    ok = len(path) > 0
     print("reachable:", ok)
 
-    # ---------- extract & print path ----------
-    path = []
     if ok:
-        path.append(planner.start)
-
-        for step in range(10):
-            if planner.start == planner.goal:
-                break
-
-            ns = planner.next_step()
-            if ns is None:
-                print("stuck: no next step")
-                break
-
-            # move and record
-            planner.move_start_to(ns)
-            path.append(planner.start)
-
-        # Print path nodes
-        print("\n--- PATH NODES (voxel, face) ---")
-        for i, n in enumerate(path):
-            print(f"{i:03d}: {n}")
-
-        # Print as face-centers (optional, easier to visualize numerically)
-        print("\n--- PATH POINTS (face centers) ---")
-        for i, n in enumerate(path):
-            print(f"{i:03d}: {face_center(n)}")
-
-        print("\nsteps:", len(path), "hit goal:", planner.start == planner.goal)
+        planner.print_path_nodes(path)
 
     # ---------- 3D visualization ----------
-    plot_3d_voxels_and_path(occ, path, start, goal, title="D* Lite on Surface Graph (3D)")
+    planner.plot_3d_voxels_and_path(path, title="D* Lite on Surface Graph (3D)")
