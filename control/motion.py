@@ -144,14 +144,30 @@ def unglue(glue_cid: int | None, body_a: int | None = None, body_b: int | None =
         p.setCollisionFilterPair(body_a, body_b, -1, -1, 1)
 
 class MoveToTargetTask:
+    @staticmethod
+    def _iter_stacks(cube_stacks):
+        """Yield stack lists from dict/list/2D-list containers."""
+        if hasattr(cube_stacks, "values"):
+            items = cube_stacks.values()
+        else:
+            items = cube_stacks
+
+        for item in items:
+            if isinstance(item, list):
+                if not item:
+                    continue
+                if all(isinstance(cube_id, int) for cube_id in item):
+                    yield item
+                else:
+                    yield from MoveToTargetTask._iter_stacks(item)
+
     def __init__(self, cube_stacks, cube_picked, delta_per_step=0.0005):
         self.reached = False
         self.stepsize = delta_per_step
 
         self.map = Grid(bounds=[[0, 1600], [0, 1600]])
         self.map.fill_boundary_with_obstacles()
-        stacks_iter = cube_stacks.values() if hasattr(cube_stacks, "values") else cube_stacks
-        for cubes in stacks_iter:
+        for cubes in self._iter_stacks(cube_stacks):
             for cube in cubes:
                 if cube_picked.get(cube, True):
                     continue
