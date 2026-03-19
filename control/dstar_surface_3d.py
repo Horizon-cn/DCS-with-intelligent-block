@@ -106,6 +106,10 @@ class DStarLiteSurface3D:
         self.g[self.goal] = INF
         self.OPEN.push(self.key(self.goal), self.goal)
         print(f"Initialized D* Lite with start={self.start} and goal={self.goal}")
+        
+        # --- batch update mechanism ---
+        self.update_buffer: Dict[Tuple[int,int,int], int] = {}  # voxel -> new_occ value
+        self.affected_nodes_cache: Set[Node] = set()  # accumulated affected nodes
 
     # --- basic voxel helpers ---
     def in_bounds(self, v: Tuple[int,int,int]) -> bool:
@@ -304,6 +308,44 @@ class DStarLiteSurface3D:
         self.compute_shortest_path()
         return self.g.get(self.start, INF) < INF
 
+    def extract_path_stateless(self, max_steps: int = 1000) -> List[Node]:
+        """
+        Extract path from start to goal WITHOUT modifying planner state.
+        This is useful for visualization after replanning.
+        
+        Returns path by tracing greedy policy from g-values.
+        """
+        path: List[Node] = []
+        if self.g.get(self.start, INF) >= INF:
+            return path
+        
+        current = self.start
+        path.append(current)
+        
+        for _ in range(max_steps):
+            if current == self.goal:
+                break
+            
+            # Greedy step: find successor with minimum cost
+            best = INF
+            best_s = None
+            for s in self.successors(current):
+                if s.pos == current.pos:
+                    continue
+                c = self.cost(current, s)
+                val = c + self.g.get(s, INF)
+                if val < best:
+                    best = val
+                    best_s = s
+            
+            if best_s is None:
+                break
+            
+            current = best_s
+            path.append(current)
+        
+        return path
+    
     def plan(self, max_steps: int = 1000) -> List[Node]:
         """Plan from current start to goal and return PATH NODES list."""
         path: List[Node] = []
@@ -413,13 +455,24 @@ class DStarLiteSurface3D:
 
         self.compute_shortest_path()
 
-    def update_voxel(self, v: Tuple[int,int,int], new_occ: int):
+    def update_voxel(self, v: Tuple[int,int,int], new_occ: int, deferred: bool = False):
         """
-        Occasional map update: change occupancy at voxel v (0/1),
-        then locally repair affected surface nodes.
+        Update occupancy at voxel v.
+        
+        Args:
+            v: voxel coordinate (x, y, z)
+            new_occ: new occupancy value (0/1)
+            deferred: if True, buffer the update and don't replan immediately;
+                      if False, apply immediately and replan
         """
-        x,y,z = v
-        self.occ[x,y,z] = new_occ
+        if deferred:
+            # Buffer the update for batch processing
+            self.update_buffer[v] = new_occ
+            return
+        
+        # Immediate update (legacy behavior or final application)
+        x, y, z = v
+        self.occ[x, y, z] = new_occ
 
         # affected voxels: v and its 6-neighbors (because exposure depends on 6-neighborhood)
         affected_voxels = [v]
@@ -454,6 +507,107 @@ class DStarLiteSurface3D:
                 self.update_vertex(n)
 
         self.compute_shortest_path()
+    
+    def buffer_update(self, v: Tuple[int,int,int], new_occ: int):
+        """
+        Buffer a single voxel occupancy update. 
+        Does NOT trigger replanning - use apply_batch_updates() for that.
+        
+        Args:
+            v: voxel coordinate
+            new_occ: new occupancy value
+        """
+        self.update_buffer[v] = new_occ
+    
+    def buffer_updates(self, updates: Dict[Tuple[int,int,int], int]):
+        """
+        Buffer multiple voxel updates at once.
+        
+        Args:
+            updates: dict mapping voxel coordinates to new occupancy values
+        """
+        self.update_buffer.update(updates)
+    
+    def apply_batch_updates(self, replan: bool = True):
+        """
+        Apply all buffered voxel updates and optionally trigger replanning.
+        This is efficient because it avoids redundant recompute_shortest_path calls.
+        
+        Args:
+            replan: if True, call compute_shortest_path once after all updates;
+                    if False, updates are applied but path not recomputed (you must call later)
+        
+        Returns:
+            Number of updates applied
+        """
+        if not self.update_buffer:
+            return 0
+        
+        num_updates = len(self.update_buffer)
+        
+        # First pass: apply occupancy changes directly (without replan)
+        for v, new_occ in self.update_buffer.items():
+            x, y, z = v
+            self.occ[x, y, z] = new_occ
+        
+        # Second pass: identify all affected surface nodes
+        affected_voxels = set()
+        for v in self.update_buffer.keys():
+            affected_voxels.add(v)
+            # Add 6-neighbors since exposure depends on neighborhood
+            for dv in [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]:
+                vv = self.addv(v, dv)
+                if self.in_bounds(vv):
+                    affected_voxels.add(vv)
+        
+        # Third pass: update all affected planning nodes
+        affected_nodes: Set[Node] = set()
+        for vv in affected_voxels:
+            if not self.in_bounds(vv):
+                continue
+            if self.occ_at(vv) != 0:
+                continue
+            
+            # Get current directions
+            dirs = self.available_face_dirs(vv)
+            for f in dirs:
+                affected_nodes.add(Node(self.idx_to_center(vv), f))
+            
+            # Keep old keys for cleanup
+            probe = Node(self.idx_to_center(vv), "+X")
+            if probe in self.g or probe in self.rhs:
+                affected_nodes.add(probe)
+        
+        # Fourth pass: update vertices (accumulate affected nodes, don't replan yet)
+        for n in affected_nodes:
+            if self.valid_node(n):
+                self.update_vertex(n)
+            else:
+                self.rhs[n] = INF
+                self.g[n] = INF
+                self.update_vertex(n)
+        
+        # Fifth pass: single replanning after all updates
+        if replan:
+            self.compute_shortest_path()
+            print(f"Applied {num_updates} batch updates and replanned")
+        else:
+            print(f"Applied {num_updates} batch updates (deferred replanning)")
+        
+        # Clear buffer
+        self.update_buffer.clear()
+        self.affected_nodes_cache.clear()
+        
+        return num_updates
+    
+    def clear_buffer(self):
+        """Clear buffered updates without applying them."""
+        self.update_buffer.clear()
+        self.affected_nodes_cache.clear()
+    
+    def get_buffer_size(self) -> int:
+        """Get number of pending updates in buffer."""
+        return len(self.update_buffer)
 
 
 # --- Example of how you'd call it (you can delete this in your project) ---
@@ -506,3 +660,54 @@ if __name__ == "__main__":
 
     # ---------- 3D visualization ----------
     planner.plot_3d_voxels_and_path(path, title="D* Lite on Surface Graph (3D)")
+
+
+# ============================================================================
+# BATCH REPLANNING API DOCUMENTATION
+# ============================================================================
+"""
+D* Lite now supports efficient batch updates for dynamic replanning:
+
+BASIC API:
+    planner = DStarLiteSurface3D(occ, size_xyz, start, goal)
+    
+    # Method 1: Buffer single update
+    planner.buffer_update((x,y,z), new_occ_value)
+    
+    # Method 2: Buffer multiple updates at once
+    updates_dict = {(x1,y1,z1): 0, (x2,y2,z2): 1, ...}
+    planner.buffer_updates(updates_dict)
+    
+    # Apply all buffered updates with single replan (efficient!)
+    num_applied = planner.apply_batch_updates(replan=True)
+    
+    # Extract path after replanning
+    new_path = planner.plan(max_steps=100)
+
+PERFORMANCE BENEFITS:
+    Without batching:
+        for each voxel change:
+            planner.update_voxel(v, new_occ)  # calls compute_shortest_path() internally
+        Total: N calls to compute_shortest_path() for N voxel changes
+    
+    With batching:
+        for each voxel change:
+            planner.buffer_update(v, new_occ)  # No planning yet
+        planner.apply_batch_updates(replan=True)  # Single compute_shortest_path() call!
+        Total: 1 call to compute_shortest_path() for N voxel changes
+
+DEFERRED REPLANNING PATTERN:
+    # Collect updates without immediate replanning
+    changes = detect_map_changes()  # returns dict
+    planner.buffer_updates(changes)
+    planner.apply_batch_updates(replan=False)  # Apply updates but defer replanning
+    
+    # Later, when ready to plan:
+    planner.compute_shortest_path()  # Replanning done
+    path = planner.plan()
+
+UTILITY METHODS:
+    planner.get_buffer_size()        # Check how many updates are buffered
+    planner.clear_buffer()           # Discard all buffered updates
+    planner.update_voxel(v, occ, deferred=False)  # Single immediate update (legacy)
+"""

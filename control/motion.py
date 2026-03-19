@@ -1,9 +1,12 @@
 from __future__ import annotations
 import pybullet as p
+import numpy as np
+from typing import Dict
 from python_motion_planning import *
 from config_loader import load_config
 from control.move import goto, move_dir, move_tar
 from control.plan import Grid, motionplan
+from control.dstar_surface_3d import DStarLiteSurface3D, Node, NORM, FACES
 
 cfg = load_config()
 scaling_factor = cfg["simulation"]["scaling_factor"]
@@ -221,3 +224,242 @@ class MoveToTargetTask:
                     p.stepSimulation()
 
         return
+
+
+class DynamicMoveToTargetTask:
+    """
+    支持 D* Lite 动态replanning的3D移动任务。
+    在执行期间监测占用栅格变化，使用增量更新而不是重新规划。
+    """
+    def __init__(self, occ: np.ndarray, size_xyz: tuple, cube_stacks, cube_picked, delta_per_step: float = 0.002):
+        """
+        Args:
+            occ: 3D occupancy array (X, Y, Z)
+            size_xyz: (X, Y, Z) grid dimensions
+            cube_stacks: cube position tracking
+            cube_picked: cube pick status tracking
+            delta_per_step: movement speed per simulation step
+        """
+        self.occ = occ  # Reference to occupancy grid (shared, monitored for changes)
+        self.size_xyz = size_xyz
+        self.cube_stacks = cube_stacks
+        self.cube_picked = cube_picked
+        self.stepsize = delta_per_step
+        
+        # Track previous occupancy for change detection
+        self.prev_occ = np.copy(occ)
+        
+        # D* Lite planner (initialized in setup())
+        self.planner = None
+        self.path = []
+        self.current_i = 0
+        self.reached = False
+        self.cruise_z = 0
+        
+        # Replanning config
+        self.replan_interval = 10  # Check for map changes every N steps
+        self.step_count = 0
+        
+    def detect_map_changes(self) -> Dict[tuple[int,int,int], int]:
+        """
+        Detect which voxels changed between current and previous occupancy.
+        Returns dict mapping changed voxel coordinates to their new occupancy values.
+        """
+        changed = {}
+        for x in range(self.size_xyz[0]):
+            for y in range(self.size_xyz[1]):
+                for z in range(self.size_xyz[2]):
+                    if self.occ[x, y, z] != self.prev_occ[x, y, z]:
+                        new_val = int(self.occ[x, y, z])
+                        changed[(x, y, z)] = new_val
+                        self.prev_occ[x, y, z] = self.occ[x, y, z]
+        return changed
+    
+    def setup(self, start_pos: tuple[float,float,float], goal_pos: tuple[float,float,float], robot_id: int):
+        """
+        Initialize planner with start and goal nodes on obstacle surfaces.
+        
+        Args:
+            start_pos: robot current position (x, y, z)
+            goal_pos: target position (x, y, z)
+            robot_id: PyBullet robot ID
+        """
+        self.target_pos = goal_pos
+        self.reached = False
+        self.current_i = 0
+        self.cruise_z = p.getBasePositionAndOrientation(robot_id)[0][2]
+        self.step_count = 0
+        
+        # Find valid start and goal nodes (free cell centers adjacent to obstacles)
+        start_node = self._find_closest_node(start_pos, robot_id)
+        goal_node = self._find_closest_node(goal_pos, robot_id)
+        
+        if start_node is None or goal_node is None:
+            print(f"Warning: Could not find valid start/goal nodes. Start={start_node}, Goal={goal_node}")
+            self.reached = True
+            return
+        
+        # Initialize D* Lite planner
+        try:
+            self.planner = DStarLiteSurface3D(self.occ, self.size_xyz, start_node, goal_node)
+            self.path = self.planner.plan(max_steps=100)
+            
+            if not self.path:
+                print(f"Warning: No path found from {start_node} to {goal_node}")
+                self.reached = True
+        except Exception as e:
+            print(f"Error initializing D* Lite planner: {e}")
+            self.reached = True
+    
+    def _find_closest_node(self, pos: tuple[float,float,float], robot_id: int) -> Node | None:
+        """
+        Find closest free voxel to position that has an exposed obstacle face.
+        """
+        x, y, z = pos
+        grid_x = int(round(x))
+        grid_y = int(round(y))
+        grid_z = int(round(z))
+        
+        # Search radius for finding valid node
+        search_radius = 3
+        
+        for dx in range(-search_radius, search_radius + 1):
+            for dy in range(-search_radius, search_radius + 1):
+                for dz in range(-search_radius, search_radius + 1):
+                    vx, vy, vz = grid_x + dx, grid_y + dy, grid_z + dz
+                    
+                    # Check if voxel is in bounds and free
+                    if not (0 <= vx < self.size_xyz[0] and 0 <= vy < self.size_xyz[1] and 0 <= vz < self.size_xyz[2]):
+                        continue
+                    if self.occ[vx, vy, vz] != 0:
+                        continue
+                    
+                    # Find exposed faces (adjacent to obstacles)
+                    for face in FACES:
+                        ox = vx + NORM[face][0]
+                        oy = vy + NORM[face][1]
+                        oz = vz + NORM[face][2]
+                        
+                        if 0 <= ox < self.size_xyz[0] and 0 <= oy < self.size_xyz[1] and 0 <= oz < self.size_xyz[2]:
+                            if self.occ[ox, oy, oz] != 0:
+                                # Found valid node
+                                center = (vx + 0.5, vy + 0.5, vz + 0.5)
+                                return Node(center, face)
+        
+        return None
+    
+    def begin(self, robot_id: int) -> None:
+        """
+        Execute movement with dynamic replanning on occupancy changes using batch updates.
+        """
+        if not self.planner:
+            print("Planner not initialized")
+            self.reached = True
+            return
+        
+        while not self.reached:
+            # Detect map changes periodically
+            self.step_count += 1
+            if self.step_count % self.replan_interval == 0:
+                changed_voxels = self.detect_map_changes()
+                if changed_voxels:
+                    print(f"Detected {len(changed_voxels)} map changes at step {self.step_count}, buffering updates...")
+                    
+                    # Buffer all changes (no replanning yet)
+                    self.planner.buffer_updates(changed_voxels)
+                    
+                    # Apply batch updates with single replan
+                    self.planner.apply_batch_updates(replan=True)
+                    
+                    # Re-extract path after updates
+                    self.path = self._extract_path_from_planner()
+                    self.current_i = 0  # Reset to beginning of new path
+                    
+                    if not self.path:
+                        print("No path available after replanning")
+                        self.reached = True
+                        continue
+            
+            # Execute one waypoint
+            if self.current_i >= len(self.path):
+                self.reached = True
+                break
+            
+            current_pos = p.getBasePositionAndOrientation(robot_id)[0]
+            waypoint = self.path[self.current_i].pos
+            target_3d = [waypoint[0], waypoint[1], self.cruise_z]
+            
+            # Check if reached waypoint (2D comparison only)
+            if all(abs(current_pos[i] - target_3d[i]) < 0.05 for i in range(2)):
+                self.current_i += 1
+            else:
+                # Move toward waypoint
+                while not goto(robot_id, target_3d, speed=self.stepsize)[0]:
+                    p.stepSimulation()
+        
+        return
+    
+    def _extract_path_from_planner(self) -> list[Node]:
+        """
+        Extract path from D* Lite planner using stateless method.
+        Does NOT modify planner's internal state (start position, km).
+        """
+        if not self.planner:
+            return []
+        
+        # Use stateless path extraction to avoid modifying planner state
+        path = self.planner.extract_path_stateless(max_steps=200)
+        return path
+
+
+# ============================================================================
+# USAGE EXAMPLE: How to use DynamicMoveToTargetTask with batch replanning
+# ============================================================================
+"""
+Example in main.py:
+
+    from control.motion import DynamicMoveToTargetTask
+    
+    # During main loop:
+    # 1. Create task with occupancy grid and size
+    task = DynamicMoveToTargetTask(
+        occ=occ,  # numpy array (X,Y,Z)
+        size_xyz=(X, Y, Z),
+        cube_stacks=cube_stacks,
+        cube_picked=cube_picked,
+        delta_per_step=0.002  # movement speed
+    )
+    
+    # 2. Set replanning frequency (default: 10 steps)
+    task.replan_interval = 20  # Check map changes every 20 simulation steps
+    
+    # 3. Setup with start/goal positions
+    task.setup(
+        start_pos=(6.5, 1.0, 1.0),
+        goal_pos=(10.0, 10.0, 0.0),
+        robot_id=robot1_id
+    )
+    
+    # 4. Execute with automatic replanning on map changes
+    task.begin(robot_id=robot1_id)
+    
+BENEFITS OF BATCH REPLANNING:
+- Only ONE compute_shortest_path() call per check interval instead of one per voxel change
+- Accumulate all occupancy changes then update affected nodes in one pass
+- Scalable: efficient even if many voxels change simultaneously
+- Deferred replanning: buffer updates, apply them, THEN replan once
+
+D* LITE BATCH UPDATE API:
+- planner.buffer_update(v, new_occ)     -- Buffer one voxel update
+- planner.buffer_updates(dict)           -- Buffer multiple updates as dict
+- planner.apply_batch_updates(replan=True) -- Apply all buffered updates and replan
+- planner.clear_buffer()                 -- Discard buffered updates
+- planner.get_buffer_size()              -- Get number of pending updates
+
+ADVANCED: Custom replanning triggers
+    if <custom_condition>:
+        changed = task.detect_map_changes()
+        if changed:
+            task.planner.buffer_updates(changed)
+            task.planner.apply_batch_updates(replan=True)
+"""
