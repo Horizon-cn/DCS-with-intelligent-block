@@ -426,7 +426,7 @@ class DynamicMoveToTargetTask:
                 dz = target_3d[2] - current_pos[2]
                 distance = float(np.sqrt(dx * dx + dy * dy + dz * dz))
                 step_len = max(1e-4, float(self.stepsize))
-                move_steps = max(1, int(np.ceil(distance / step_len)))
+                move_steps = max(1, int(np.ceil(distance / step_len * 0.5)))  # 加速：减半移动步数
                 _, cur_orn = p.getBasePositionAndOrientation(self.robot_id)
                 move_tar(
                     self.robot_id,
