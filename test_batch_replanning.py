@@ -76,8 +76,9 @@ def test_batch_replanning():
         vx = random.randint(1, X-1)
         vy = random.randint(1, Y-1)
         vz = random.randint(1, Z-1)
-        new_val = 1 - occ[vx, vy, vz]
-        changes[(vx, vy, vz)] = new_val
+        if (vx, vy, vz) != start.pos and (vx, vy, vz) != goal.pos:
+            new_val = 1 - occ[vx, vy, vz]
+            changes[(vx, vy, vz)] = new_val
     
     print(f"   Generated {len(changes)} random map changes")
     print(f"   Buffering updates (no replanning yet)...")
@@ -108,9 +109,9 @@ def test_batch_replanning():
     # Generate more changes
     changes2 = {}
     for _ in range(8):
-        vx = random.randint(2, X-2)
-        vy = random.randint(2, Y-2)
-        vz = random.randint(2, Z-2)
+        vx = random.randint(1, X-1)
+        vy = random.randint(1, Y-1)
+        vz = random.randint(1, Z-1)
         new_val = 1 - occ[vx, vy, vz]
         changes2[(vx, vy, vz)] = new_val
     
@@ -146,11 +147,6 @@ def test_batch_replanning():
     print("\n" + "="*70)
     print("All tests completed successfully!")
     print("="*70)
-    print("\n✅ 三个关键步骤的3D可视化已生成：")
-    print("   - Step 1: 初始路径规划")
-    print("   - Step 2: 批量更新后的路径")
-    print("   - Step 3: 延迟replanning后的路径")
-    print("\n关闭所有图窗即可结束测试")
     
     return True
 

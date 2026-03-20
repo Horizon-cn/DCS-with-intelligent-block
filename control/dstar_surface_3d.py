@@ -245,7 +245,7 @@ class DStarLiteSurface3D:
         while True:
             top_key = self.OPEN.peek_key()
             start_key = self.key(self.start)
-            print(f"OPEN top key: {top_key}, start key: {start_key}, g(start): {self.g.get(self.start, INF)}, rhs(start): {self.rhs.get(self.start, INF)}")
+            #print(f"OPEN top key: {top_key}, start key: {start_key}, g(start): {self.g.get(self.start, INF)}, rhs(start): {self.rhs.get(self.start, INF)}")
             if not (top_key < start_key or self.rhs.get(self.start, INF) != self.g.get(self.start, INF)):
                 break
 
@@ -259,7 +259,7 @@ class DStarLiteSurface3D:
 
             gu = self.g.get(u, INF)
             ru = self.rhs.get(u, INF)
-            print(f"Processing node {u} with g={gu}, rhs={ru}")
+            #print(f"Processing node {u} with g={gu}, rhs={ru}")
 
             # lazy queue: skip entries for nodes that are already consistent
             if gu == ru:
@@ -268,13 +268,13 @@ class DStarLiteSurface3D:
             if gu > ru:
                 self.g[u] = ru
                 for p in self.local_predecessors(u):
-                    print(f"gu > ru: Updating predecessor {p} of {u}")
+                    #print(f"gu > ru: Updating predecessor {p} of {u}")
                     self.update_vertex(p)
             else:
                 self.g[u] = INF
                 self.update_vertex(u)
                 for p in self.local_predecessors(u):
-                    print(f"gu < ru: Updating predecessor {p} of {u}")
+                    #print(f"gu < ru: Updating predecessor {p} of {u}")
                     self.update_vertex(p)
 
     def local_predecessors(self, node: Node) -> List[Node]:

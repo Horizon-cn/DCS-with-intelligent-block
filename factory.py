@@ -146,4 +146,10 @@ class rob_info:
         task = MoveToTargetTask(cube_stacks, self.cube_picked, delta_per_step=delta_per_step)
         task.setup(target_pos, self.robot_id)
         task.begin(self.robot_id)
+
+    def move_to_smooth(self, target_pos: List[float]) -> None:
+        sim_cfg = cfg["simulation"]
+        time_step = sim_cfg["time_step"]
+        move_steps = cfg["motion"]["move_steps"]
+        move_tar(self.robot_id, target_pos, [0, 0, 0, 1], max(1, move_steps // 3), time_step)
         

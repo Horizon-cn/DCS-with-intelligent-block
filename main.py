@@ -99,8 +99,27 @@ def main() -> None:
     step_simulation(600, sim_cfg["time_step"])
 
     planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
-    path = planner.plan(max_steps=20)
+    planner.plan_from_current()  # Initialize planning
+    path = planner.extract_path_stateless(max_steps=100)
     planner.plot_3d_voxels_and_path(path)
+
+    task = DynamicMoveToTargetTask(
+        occ=occ,  # numpy array (X,Y,Z)
+        size_xyz=(X, Y, Z),
+        cube_stacks=cube_stacks,
+        cube_picked=cube_picked,
+        delta_per_step=0.002  # movement speed
+    )
+
+    task.replan_interval = 20  # Check map changes every 20 simulation steps
+
+    task.setup(
+        start_pos=[start.pos[0]+0.5, start.pos[1]+0.5, start.pos[2]],
+        goal_pos=[goal.pos[0]+0.5, goal.pos[1]+0.5, goal.pos[2]],
+        robot_id=robot2_id
+    )
+
+    task.begin()
 
     for x in range(len(cube_stacks)):
         for y in range(len(cube_stacks[x])):

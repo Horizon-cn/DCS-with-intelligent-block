@@ -289,6 +289,7 @@ class DynamicMoveToTargetTask:
         self.current_i = 0
         self.cruise_z = p.getBasePositionAndOrientation(robot_id)[0][2]
         self.step_count = 0
+        self.robot_id = robot_id
         
         # Find valid start and goal nodes (free cell centers adjacent to obstacles)
         start_node = self._find_closest_node(start_pos, robot_id)
@@ -321,7 +322,7 @@ class DynamicMoveToTargetTask:
         grid_z = int(round(z))
         
         # Search radius for finding valid node
-        search_radius = 3
+        search_radius = 1
         
         for dx in range(-search_radius, search_radius + 1):
             for dy in range(-search_radius, search_radius + 1):
@@ -348,55 +349,96 @@ class DynamicMoveToTargetTask:
         
         return None
     
-    def begin(self, robot_id: int) -> None:
+    def begin(self) -> None:
         """
-        Execute movement with dynamic replanning on occupancy changes using batch updates.
+        Execute motion along planner path and periodically replan on occupancy updates.
         """
         if not self.planner:
             print("Planner not initialized")
             self.reached = True
             return
-        
-        while not self.reached:
-            # Detect map changes periodically
-            self.step_count += 1
-            if self.step_count % self.replan_interval == 0:
-                changed_voxels = self.detect_map_changes()
-                if changed_voxels:
-                    print(f"Detected {len(changed_voxels)} map changes at step {self.step_count}, buffering updates...")
-                    
-                    # Buffer all changes (no replanning yet)
-                    self.planner.buffer_updates(changed_voxels)
-                    
-                    # Apply batch updates with single replan
-                    self.planner.apply_batch_updates(replan=True)
-                    
-                    # Re-extract path after updates
-                    self.path = self._extract_path_from_planner()
-                    self.current_i = 0  # Reset to beginning of new path
-                    
-                    if not self.path:
-                        print("No path available after replanning")
-                        self.reached = True
-                        continue
-            
-            # Execute one waypoint
-            if self.current_i >= len(self.path):
+
+        # If setup path was not available, try extracting from current planner state.
+        if not self.path:
+            self.path = self._extract_path_from_planner()
+            self.current_i = 0
+            if not self.path:
+                print("No initial path available")
                 self.reached = True
-                break
-            
-            current_pos = p.getBasePositionAndOrientation(robot_id)[0]
-            waypoint = self.path[self.current_i].pos
-            target_3d = [waypoint[0], waypoint[1], self.cruise_z]
-            
-            # Check if reached waypoint (2D comparison only)
-            if all(abs(current_pos[i] - target_3d[i]) < 0.05 for i in range(2)):
+                return
+
+        self.reached = False
+        _set_collision_with_all(self.robot_id, enabled=False)
+
+        try:
+            while not self.reached:
+                if self.current_i >= len(self.path):
+                    self.reached = True
+                    break
+
+                current_pos = p.getBasePositionAndOrientation(self.robot_id)[0]
+
+                # Periodically detect occupancy updates and trigger one batch replan.
+                self.step_count += 1
+                if self.step_count % self.replan_interval == 0:
+                    changed_voxels = self.detect_map_changes()
+                    if changed_voxels:
+                        print(
+                            f"Detected {len(changed_voxels)} map changes at step {self.step_count}, replanning..."
+                        )
+
+                        # Keep D* start aligned with current robot position before replanning.
+                        cur_node = self._find_closest_node(current_pos, self.robot_id)
+                        if cur_node is None:
+                            print("No valid current node for replanning")
+                            self.reached = True
+                            continue
+
+                        try:
+                            self.planner.move_start_to(cur_node)
+                        except Exception as e:
+                            print(f"Failed to move planner start to current node: {e}")
+                            self.reached = True
+                            continue
+
+                        self.planner.buffer_updates(changed_voxels)
+                        self.planner.apply_batch_updates(replan=True)
+
+                        self.path = self._extract_path_from_planner()
+                        self.current_i = 0
+
+                        if not self.path:
+                            print("No path available after replanning")
+                            self.reached = True
+                        continue
+
+                waypoint = self.path[self.current_i].pos
+                target_3d = [waypoint[0]+0.5, waypoint[1]+0.5, waypoint[2]]
+
+                # Advance index only when current path point is reached.
+                if all(abs(current_pos[i] - target_3d[i]) < 0.05 for i in range(3)):
+                    self.current_i += 1
+                    continue
+
+                # Move to the current waypoint using smooth interpolation.
+                dx = target_3d[0] - current_pos[0]
+                dy = target_3d[1] - current_pos[1]
+                dz = target_3d[2] - current_pos[2]
+                distance = float(np.sqrt(dx * dx + dy * dy + dz * dz))
+                step_len = max(1e-4, float(self.stepsize))
+                move_steps = max(1, int(np.ceil(distance / step_len)))
+                _, cur_orn = p.getBasePositionAndOrientation(self.robot_id)
+                move_tar(
+                    self.robot_id,
+                    target_3d,
+                    cur_orn,
+                    move_steps,
+                    cfg["simulation"]["time_step"],
+                )
                 self.current_i += 1
-            else:
-                # Move toward waypoint
-                while not goto(robot_id, target_3d, speed=self.stepsize)[0]:
-                    p.stepSimulation()
-        
+        finally:
+            _set_collision_with_all(self.robot_id, enabled=True)
+
         return
     
     def _extract_path_from_planner(self) -> list[Node]:
@@ -441,7 +483,7 @@ Example in main.py:
     )
     
     # 4. Execute with automatic replanning on map changes
-    task.begin(robot_id=robot1_id)
+    task.begin()
     
 BENEFITS OF BATCH REPLANNING:
 - Only ONE compute_shortest_path() call per check interval instead of one per voxel change
