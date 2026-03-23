@@ -27,6 +27,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "mass": 1.0,
         "lateral_friction": 0.7,
     },
+    "cube2": {
+        "mesh_file": "cube2.obj",
+        "visual_rgba": [1, 1, 1, 1],
+        "visual_specular": [0.4, 0.4, 0],
+        "frame_shift": [0, 0, 0],
+        "cube_scale": [0.70710, 0.7071, 0.7071],
+        "mass": 1.0,
+        "lateral_friction": 0.7,
+    },
     "robot": {
         "mesh_file": "cube.obj",
         "visual_rgba": [0.8, 0.2, 0.2, 1],

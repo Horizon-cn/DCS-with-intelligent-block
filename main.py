@@ -71,6 +71,15 @@ def main() -> None:
         if start.pos != goal.pos:
             break
 
+    cube2v_shape_id, cube2c_shape_id = create_cube2_shapes(cfg["cube2"])
+    cube2_id = create_cube2(
+        cube2v_shape_id,
+        cube2c_shape_id,
+        cfg["cube2"],
+        [8, 1, 1],
+        sim_cfg["use_maximal_coordinates"],
+    )
+
     robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
     robot1_id = create_robot(
         robv_shape_id,

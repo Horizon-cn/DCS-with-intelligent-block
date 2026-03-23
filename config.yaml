@@ -19,6 +19,15 @@ cube:
   mass: 1.0
   lateral_friction: 0.8
 
+cube2:
+  mesh_file: "cube.obj"
+  visual_rgba: [1, 1, 1, 1]
+  visual_specular: [0.4, 0.4, 0]
+  frame_shift: [0, -0.02, 0]
+  cube_scale: [1, 1, 1]
+  mass: 1.0
+  lateral_friction: 0.8
+
 robot:
   mesh_file: "cube.obj"
   visual_rgba: [0.8, 0.2, 0.2, 1]
