@@ -18,7 +18,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "urdf": "plane100.urdf",
         "lateral_friction": 2.0,
     },
-    "cube": {
+    "cube_org": {
         "mesh_file": "cube.obj",
         "visual_rgba": [1, 1, 1, 1],
         "visual_specular": [0.4, 0.4, 0],
@@ -27,7 +27,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "mass": 1.0,
         "lateral_friction": 0.7,
     },
-    "cube2": {
+    "cube": {
         "mesh_file": "cube2.obj",
         "visual_rgba": [1, 1, 1, 1],
         "visual_specular": [0.4, 0.4, 0],

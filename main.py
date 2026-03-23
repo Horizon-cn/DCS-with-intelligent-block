@@ -71,12 +71,12 @@ def main() -> None:
         if start.pos != goal.pos:
             break
 
-    cube2v_shape_id, cube2c_shape_id = create_cube2_shapes(cfg["cube2"])
-    cube2_id = create_cube2(
-        cube2v_shape_id,
-        cube2c_shape_id,
-        cfg["cube2"],
-        [8, 1, 1],
+    cubev_shape_id, cubec_shape_id = create_cube_shapes_org(cfg["cube_org"])
+    cube_id = create_cube_org(
+        cubev_shape_id,
+        cubec_shape_id,
+        cfg["cube_org"],
+        [9, 1, 1],
         sim_cfg["use_maximal_coordinates"],
     )
 

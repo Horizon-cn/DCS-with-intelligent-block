@@ -7,6 +7,42 @@ from control.move import *
 
 
 
+def create_cube_shapes_org(cube_cfg: dict) -> tuple[int, int]:
+    visual_shape_id = p.createVisualShape(
+        shapeType=p.GEOM_MESH,
+        fileName=cube_cfg["mesh_file"],
+        rgbaColor=cube_cfg["visual_rgba"],
+        specularColor=cube_cfg["visual_specular"],
+        visualFramePosition=cube_cfg["frame_shift"],
+        meshScale=cube_cfg["cube_scale"],
+    )
+
+    collision_shape_id = p.createCollisionShape(
+        shapeType=p.GEOM_MESH,
+        fileName=cube_cfg["mesh_file"],
+        collisionFramePosition=cube_cfg["frame_shift"],
+        meshScale=cube_cfg["cube_scale"],
+    )
+
+    return visual_shape_id, collision_shape_id
+
+def create_cube_org(
+    visual_shape_id: int,
+    collision_shape_id: int,
+    cube_cfg: dict,
+    base_position: List[float],
+    use_maximal_coordinates: bool,
+) -> int:
+    cube_id = p.createMultiBody(
+        baseMass=cube_cfg["mass"],
+        baseCollisionShapeIndex=collision_shape_id,
+        baseVisualShapeIndex=visual_shape_id,
+        basePosition=base_position,
+        useMaximalCoordinates=use_maximal_coordinates,
+    )
+    p.changeDynamics(cube_id, -1, lateralFriction=cube_cfg["lateral_friction"])
+    return cube_id
+
 def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
     visual_shape_id = p.createVisualShape(
         shapeType=p.GEOM_MESH,
@@ -27,42 +63,6 @@ def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
     return visual_shape_id, collision_shape_id
 
 def create_cube(
-    visual_shape_id: int,
-    collision_shape_id: int,
-    cube_cfg: dict,
-    base_position: List[float],
-    use_maximal_coordinates: bool,
-) -> int:
-    cube_id = p.createMultiBody(
-        baseMass=cube_cfg["mass"],
-        baseCollisionShapeIndex=collision_shape_id,
-        baseVisualShapeIndex=visual_shape_id,
-        basePosition=base_position,
-        useMaximalCoordinates=use_maximal_coordinates,
-    )
-    p.changeDynamics(cube_id, -1, lateralFriction=cube_cfg["lateral_friction"])
-    return cube_id
-
-def create_cube2_shapes(cube_cfg: dict) -> tuple[int, int]:
-    visual_shape_id = p.createVisualShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        rgbaColor=cube_cfg["visual_rgba"],
-        specularColor=cube_cfg["visual_specular"],
-        visualFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    collision_shape_id = p.createCollisionShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        collisionFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    return visual_shape_id, collision_shape_id
-
-def create_cube2(
     visual_shape_id: int,
     collision_shape_id: int,
     cube_cfg: dict,
