@@ -82,7 +82,7 @@ Where:
 This is the node's current optimistic value estimate. Smaller means more urgent.
 
 `h(start, s)`
-Uses voxel L1 (Manhattan) distance to prioritize nodes more relevant to the current `start` path.
+Uses voxel L1 distance to prioritize nodes more relevant to the current `start` path.
 
 `km`
 A global offset used after start movement to preserve incremental behavior without recomputing all keys.

@@ -2,6 +2,7 @@ import time
 import pybullet as p
 import python_motion_planning as pmp
 import math
+from pathlib import Path
 
 from factory import *
 from config_loader import load_config
@@ -100,6 +101,14 @@ def main() -> None:
     )
     robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
     rob_num+=1
+
+    new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
+    robot_id = p.loadURDF(
+        new_robot_urdf,
+        basePosition=[8, 6, 0.0],
+        baseOrientation=[0, 0, 0, 1],
+        useFixedBase=False,
+    )
 
     obj_dict["plane"] = plane_id
     #obj_dict["cubes"] = cubes
