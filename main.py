@@ -105,7 +105,7 @@ def main() -> None:
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
     robot_id = p.loadURDF(
         new_robot_urdf,
-        basePosition=[8, 6, 0.0],
+        basePosition=[goal.pos[0]+0.5, goal.pos[1]+0.5, goal.pos[2]],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,
     )
