@@ -16,6 +16,7 @@ import pybullet as p
 from pathlib import Path
 from config_loader import load_config
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
+from control.motion import _set_collision_with_all
 
 
 def print_joint_info(robot_id: int) -> None:
@@ -53,12 +54,32 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
     direction = 1 if target_angle > cur_angle else -1
     tol = 0.01  # 容许误差
     max_steps = steps * 3
-    max_force = 500  # 增大力矩，防止抬不起来
+    max_force = 1000
+    num_joints = p.getNumJoints(robot_id)
+    # 锁定除当前关节外的所有关节
+    for j in range(num_joints):
+        if j == joint_index:
+            continue
+        joint_info = p.getJointInfo(robot_id, j)
+        joint_type = joint_info[2]
+        if joint_type == p.JOINT_REVOLUTE or joint_type == p.JOINT_PRISMATIC:
+            cur_pos = p.getJointState(robot_id, j)[0]
+            p.setJointMotorControl2(
+                robot_id,
+                j,
+                p.POSITION_CONTROL,
+                targetPosition=cur_pos,
+                force=max_force
+            )
     for i in range(max_steps):
         cur_angle = p.getJointState(robot_id, joint_index)[0]
         err = target_angle - cur_angle
-        if abs(err) < tol:
-            # 到达目标，停止
+        dist = abs(err)
+        # 设定减速区间
+        slow_zone = 0.3  # 距目标小于此值开始减速
+        min_speed = 0.01 * abs(speed)
+        # 速度规划：距离越近速度越小，到达目标前速度已降为0
+        if dist < tol:
             p.setJointMotorControl2(
                 robot_id,
                 joint_index,
@@ -67,11 +88,10 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
                 force=max_force
             )
             break
-        # 方向控制
-        v = direction * abs(speed)
-        # 如果接近目标，减速
-        if abs(err) < 0.2:
-            v *= 0.3
+        if dist < slow_zone:
+            v = direction * max(min_speed, abs(speed) * (dist / slow_zone))
+        else:
+            v = direction * abs(speed)
         p.setJointMotorControl2(
             robot_id,
             joint_index,
@@ -110,7 +130,7 @@ def demo_joint_motion() -> None:
         new_robot_urdf,
         basePosition=[0, 0, 0],
         baseOrientation=[0, 0, 0, 1],
-        useFixedBase=True,  # 固定基座以便观察关节运动
+        useFixedBase=False,  # 固定基座以便观察关节运动
     )
     
     print("=" * 80)
@@ -127,30 +147,118 @@ def demo_joint_motion() -> None:
     
     # 依次控制所有7个关节：-90° -> +180° -> -90°
     num_joints = p.getNumJoints(robot_id)
-    print(f"依次控制所有类型为0（revolute）的关节: -90° -> +180° -> -90°")
-    for joint_idx in range(num_joints):
-        joint_info = p.getJointInfo(robot_id, joint_idx)
-        joint_name = joint_info[1].decode('utf-8')
-        joint_type = joint_info[2]
-        if joint_type != 0:
-            continue
-        print(f"\n关节{joint_idx} [{joint_name}] 运动: -90° -> +180° -> -90° (类型: {joint_type})")
-        cur_angle = p.getJointState(robot_id, joint_idx)[0]
-        # 第一次：相对当前角度-90°
-        move_joint(robot_id, joint_idx, cur_angle - math.pi/2, steps=200)
-        print(f"   已完成 -90° 运动")
-        time.sleep(1)
-        # 第二次：相对当前角度+180°
-        cur_angle = p.getJointState(robot_id, joint_idx)[0]
-        move_joint(robot_id, joint_idx, cur_angle + math.pi, steps=400)
-        print(f"   已完成 +180° 运动")
-        time.sleep(1)
-        # 第三次：相对当前角度-90°
-        cur_angle = p.getJointState(robot_id, joint_idx)[0]
-        move_joint(robot_id, joint_idx, cur_angle - math.pi/2, steps=200)
-        print(f"   已完成 -90° 运动")
-        time.sleep(1)
-    print("\n所有revolute关节演示完成！")
+    # print(f"依次控制所有类型为0（revolute）的关节: -90° -> +180° -> -90°")
+    # for joint_idx in range(num_joints):
+    #     joint_info = p.getJointInfo(robot_id, joint_idx)
+    #     joint_name = joint_info[1].decode('utf-8')
+    #     joint_type = joint_info[2]
+    #     if joint_type != 0:
+    #         continue
+    #     print(f"\n关节{joint_idx} [{joint_name}] 运动: -90° -> +180° -> -90° (类型: {joint_type})")
+    #     cur_angle = p.getJointState(robot_id, joint_idx)[0]
+    #     # 第一次：相对当前角度-90°
+    #     move_joint(robot_id, joint_idx, cur_angle - math.pi/2, steps=200)
+    #     print(f"   已完成 -90° 运动")
+    #     time.sleep(1)
+    #     # 第二次：相对当前角度+180°
+    #     cur_angle = p.getJointState(robot_id, joint_idx)[0]
+    #     move_joint(robot_id, joint_idx, cur_angle + math.pi, steps=400)
+    #     print(f"   已完成 +180° 运动")
+    #     time.sleep(1)
+    #     # 第三次：相对当前角度-90°
+    #     cur_angle = p.getJointState(robot_id, joint_idx)[0]
+    #     move_joint(robot_id, joint_idx, cur_angle - math.pi/2, steps=200)
+    #     print(f"   已完成 -90° 运动")
+    #     time.sleep(1)
+    # print("\n所有revolute关节演示完成！")
+
+        # demo: 直接用索引控制关节
+    # j3_y: 索引7, j2_single: 索引4, j1_y: 索引1
+    # j3_y +30°
+
+        # 1. 获取end_platform的link index（假设为9）
+
+    base_platform_idx = -1
+    end_platform_idx = None
+
+    for i in range(p.getNumJoints(robot_id)):
+        joint_info = p.getJointInfo(robot_id, i)
+        if joint_info[12].decode('utf-8') == 'end_platform':
+            end_platform_idx = i
+            print(f"找到end_platform，索引: {end_platform_idx}")
+
+    # 固定base_platform与地面plane
+    base_pos, base_orn = p.getBasePositionAndOrientation(robot_id)
+    cid_base_plane = p.createConstraint(
+        parentBodyUniqueId=robot_id,
+        parentLinkIndex=base_platform_idx,
+        childBodyUniqueId=plane_id,
+        childLinkIndex=-1,
+        jointType=p.JOINT_FIXED,
+        jointAxis=[0,0,0],
+        parentFramePosition=[0,0,0],
+        childFramePosition=base_pos,
+        parentFrameOrientation=base_orn,
+        childFrameOrientation=[0,0,0,1]
+    )
+
+
+    cur = p.getJointState(robot_id, 2)[0]
+    move_joint(robot_id, 2, cur + math.radians(-90), steps=120)
+    
+    cur = p.getJointState(robot_id, 7)[0]
+    move_joint(robot_id, 7, cur + math.radians(30), steps=120)
+    print("j3_y(7) 已完成 +30° 运动")
+
+    # j2_single +120°
+    cur = p.getJointState(robot_id, 4)[0]
+    move_joint(robot_id, 4, cur + math.radians(120), steps=240)
+    print("j2_single(4) 已完成 +120° 运动")
+
+    # j1_x +30°
+    cur = p.getJointState(robot_id, 0)[0]
+    move_joint(robot_id, 0, cur + math.radians(30), steps=120)
+    print("j1_x(0) 已完成 +30° 运动")
+
+    # === 更换基座为end_platform并抬起base_platform使机器人竖直 ===
+
+
+    if end_platform_idx is not None:        
+        # 先移除base_platform与地面的约束（如果有）
+        p.removeConstraint(cid_base_plane)
+        # 2. 获取end_platform当前世界位置
+        link_state = p.getLinkState(robot_id, end_platform_idx)
+        pos, orn = link_state[0], link_state[1]
+        # 3. 创建约束，将end_platform与地面plane_id固定
+        cid = p.createConstraint(
+            parentBodyUniqueId=robot_id,
+            parentLinkIndex=end_platform_idx,
+            childBodyUniqueId=plane_id,
+            childLinkIndex=-1,
+            jointType=p.JOINT_FIXED,
+            jointAxis=[0,0,0],
+            parentFramePosition=[0,0,0],
+            childFramePosition=pos,
+            parentFrameOrientation=orn,
+            childFrameOrientation=[0,0,0,1]
+        )
+        print(f"已将end_platform({end_platform_idx})与地面固定，约束id={cid}")
+
+        # 切换基座后，依次让j3_y、j2_single、j1_y反向运动
+        # j3_y: 索引7, j2_single: 索引4, j1_y: 索引1
+        cur = p.getJointState(robot_id, 7)[0]
+        move_joint(robot_id, 7, cur - math.radians(30), steps=120)
+        print("j3_y(7) 已完成 -30° 运动")
+        cur = p.getJointState(robot_id, 4)[0]
+        move_joint(robot_id, 4, cur - math.radians(120), steps=240)
+        print("j2_single(4) 已完成 -120° 运动")
+        cur = p.getJointState(robot_id, 0)[0]
+        move_joint(robot_id, 0, cur - math.radians(30), steps=120)
+        print("j1_x(0) 已完成 -30° 运动")
+
+        p.removeConstraint(cid)
+
+
     # 保持仿真运行，方便观察
     for _ in range(200):
         p.stepSimulation()
