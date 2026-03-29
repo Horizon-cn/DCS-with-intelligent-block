@@ -4,7 +4,7 @@ import numpy as np
 from typing import Dict
 from python_motion_planning import *
 from config_loader import load_config
-from control.move import goto, move_dir, move_tar
+from control.move import goto, move_base_dir, move_base_tar
 from control.plan import Grid, motionplan
 from control.dstar_surface_3d import DStarLiteSurface3D, Node, NORM, FACES
 
@@ -76,15 +76,15 @@ def pickup_cube(cubeid: int, robotid: int) -> None:
         wp1 = [cube_pos[0], cube_pos[1], safe_z]
         wp2 = [target_pos[0], target_pos[1], safe_z]
         wp3 = target_pos
-        move_tar(cubeid, wp1, cube_orn, max(1, move_steps // 3), time_step)
-        move_tar(cubeid, wp2, cube_orn, max(1, move_steps // 3), time_step)
-        move_tar(cubeid, wp3, cube_orn, max(1, move_steps - 2 * (move_steps // 3)), time_step)
+        move_base_tar(cubeid, wp1, cube_orn, max(1, move_steps // 3), time_step)
+        move_base_tar(cubeid, wp2, cube_orn, max(1, move_steps // 3), time_step)
+        move_base_tar(cubeid, wp3, cube_orn, max(1, move_steps - 2 * (move_steps // 3)), time_step)
     else:
         # 先XY后Z
         wp1 = [target_pos[0], target_pos[1], cube_pos[2]]
         wp2 = target_pos
-        move_tar(cubeid, wp1, cube_orn, max(1, move_steps // 2), time_step)
-        move_tar(cubeid, wp2, cube_orn, max(1, move_steps - (move_steps // 2)), time_step)
+        move_base_tar(cubeid, wp1, cube_orn, max(1, move_steps // 2), time_step)
+        move_base_tar(cubeid, wp2, cube_orn, max(1, move_steps - (move_steps // 2)), time_step)
 
     reset_cube_velocity(cubeid)
     _set_collision_with_all(cubeid, enabled=True)
@@ -96,7 +96,7 @@ def drop_cube(top_cube, robotid, obj_dicts) -> None:
     _, robot_orn = p.getBasePositionAndOrientation(robotid)
     # Disable collisions while extracting the top cube so lower cubes remain undisturbed.
     set_cube_collisions(top_cube, robotid, obj_dicts["plane"], enabled=False)
-    move_dir(
+    move_base_dir(
         top_cube,
         robot_orn,
         cfg["motion"]["x_offset"],
@@ -428,7 +428,7 @@ class DynamicMoveToTargetTask:
                 step_len = max(1e-4, float(self.stepsize))
                 move_steps = max(1, int(np.ceil(distance / step_len * 0.5)))  # 加速：减半移动步数
                 _, cur_orn = p.getBasePositionAndOrientation(self.robot_id)
-                move_tar(
+                move_base_tar(
                     self.robot_id,
                     target_3d,
                     cur_orn,

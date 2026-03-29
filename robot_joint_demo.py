@@ -203,8 +203,8 @@ def demo_joint_motion() -> None:
     )
 
 
-    cur = p.getJointState(robot_id, 2)[0]
-    move_joint(robot_id, 2, cur + math.radians(-90), steps=120)
+    cur = p.getJointState(robot_id, 0)[0]
+    move_joint(robot_id, 0, cur + math.radians(90), steps=120)
     
     cur = p.getJointState(robot_id, 7)[0]
     move_joint(robot_id, 7, cur + math.radians(30), steps=120)
@@ -216,9 +216,9 @@ def demo_joint_motion() -> None:
     print("j2_single(4) 已完成 +120° 运动")
 
     # j1_x +30°
-    cur = p.getJointState(robot_id, 0)[0]
-    move_joint(robot_id, 0, cur + math.radians(30), steps=120)
-    print("j1_x(0) 已完成 +30° 运动")
+    cur = p.getJointState(robot_id, 1)[0]
+    move_joint(robot_id, 1, cur + math.radians(30), steps=120)
+    print("j1_x(1) 已完成 +30° 运动")
 
     # === 更换基座为end_platform并抬起base_platform使机器人竖直 ===
 
@@ -252,9 +252,9 @@ def demo_joint_motion() -> None:
         cur = p.getJointState(robot_id, 4)[0]
         move_joint(robot_id, 4, cur - math.radians(120), steps=240)
         print("j2_single(4) 已完成 -120° 运动")
-        cur = p.getJointState(robot_id, 0)[0]
-        move_joint(robot_id, 0, cur - math.radians(30), steps=120)
-        print("j1_x(0) 已完成 -30° 运动")
+        cur = p.getJointState(robot_id, 1)[0]
+        move_joint(robot_id, 1, cur - math.radians(30), steps=120)
+        print("j1_x(1) 已完成 -30° 运动")
 
         p.removeConstraint(cid)
 

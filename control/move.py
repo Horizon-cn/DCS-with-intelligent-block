@@ -59,7 +59,7 @@ def goto(robot_id: int, target_pos: list[float], speed: float = 0.005, tolerance
     
     return (False, cur_pos)
 
-def move_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: float) -> None:
+def move_base_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: float) -> None:
     start_pos, start_orn = p.getBasePositionAndOrientation(obj)
 
     # Forward is robot local +X axis; convert it into world coordinates.
@@ -83,7 +83,7 @@ def move_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: flo
         p.stepSimulation()
         time.sleep(time_step)
 
-def move_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
+def move_base_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
     start_pos, _ = p.getBasePositionAndOrientation(obj_id)
     for i in range(steps):
         t = (i + 1) / steps
@@ -97,6 +97,8 @@ def move_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_step: f
         p.stepSimulation()
         time.sleep(time_step)
 
+def move_rob_tar(robot_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
+    time.sleep(time_step)
 
 def rotate_base(base_id: int, angle: float) -> None:
     sim_cfg = cfg["simulation"]

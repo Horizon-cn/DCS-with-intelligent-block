@@ -188,5 +188,5 @@ class rob_info:
         sim_cfg = cfg["simulation"]
         time_step = sim_cfg["time_step"]
         move_steps = cfg["motion"]["move_steps"]
-        move_tar(self.robot_id, target_pos, [0, 0, 0, 1], max(1, move_steps // 3), time_step)
+        move_base_tar(self.robot_id, target_pos, [0, 0, 0, 1], max(1, move_steps // 3), time_step)
         
