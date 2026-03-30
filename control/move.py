@@ -234,6 +234,10 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
 
     p.removeConstraint(cid_base_plane)
 
+    for _ in range(120):  # 假设仿真步长为1/240s，这里相当于1秒
+        p.stepSimulation()
+        time.sleep(1/240)
+
     if base_id == base_platform_idx:
         link_state = p.getLinkState(robot_id, end_platform_idx)
         base_pos_new, base_orn_new = link_state[0], link_state[1]
@@ -253,10 +257,6 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         childFrameOrientation=[0,0,0,1]
     )
 
-    for _ in range(240):  # 假设仿真步长为1/240s，这里相当于1秒
-        p.stepSimulation()
-        time.sleep(1/240)
-
     cur1 = p.getJointState(robot_id, joint_ids[1])[0]
     move_joint(robot_id, joint_ids[1], cur1 - theta1, steps=120)
 
@@ -269,6 +269,10 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
 
     # 3. 解除end_platform与地面的约束
     p.removeConstraint(cid_end_plane2)
+
+    for _ in range(120):  # 假设仿真步长为1/240s，这里相当于1秒
+        p.stepSimulation()
+        time.sleep(1/240)
 
     if base_id == base_platform_idx:
         return end_platform_idx

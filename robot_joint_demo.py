@@ -252,10 +252,6 @@ def demo_joint_motion() -> None:
     new_base = move_rob_dir(robot_id, -1, 0, plane_id)
 
     for i in range(5):
-        for _ in range(480):  # 假设仿真步长为1/240s，这里相当于1秒
-            p.stepSimulation()
-            time.sleep(sim_cfg["time_step"])
-
         new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
     # 保持仿真运行，方便观察
