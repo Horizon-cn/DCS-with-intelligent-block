@@ -249,10 +249,11 @@ def demo_joint_motion() -> None:
     #     p.stepSimulation()
     #     time.sleep(sim_cfg["time_step"])
 
-    new_base = move_rob_dir(robot_id, -1, 0, plane_id)
+    new_base = move_rob_dir(robot_id, -1, 30, plane_id)
 
-    for i in range(5):
-        new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
+    for i in range(2):
+        new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
+    new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
     # 保持仿真运行，方便观察
     for _ in range(200):

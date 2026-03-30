@@ -199,12 +199,18 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         platform_id = base_id
         platform_id_new = base_platform_idx
 
-        theta0 = -math.radians(ang)
+        theta0 = math.radians(ang)
         theta1 = -math.radians(30)
         theta2 = -math.radians(120)
 
-        joint_ids = [6, 1, 4, 7]
+        joint_ids = [8, 1, 4, 7]
 
+    # --- 修正：用当前实际相对位姿 ---
+    # 获取地面（plane_id）世界位姿
+    plane_pos, plane_orn = p.getBasePositionAndOrientation(plane_id)
+    # 计算plane在link下的相对位姿
+    inv_link_pos, inv_link_orn = p.invertTransform(base_pos, base_orn)
+    rel_pos, rel_orn = p.multiplyTransforms(inv_link_pos, inv_link_orn, plane_pos, plane_orn)
     cid_base_plane = p.createConstraint(
         parentBodyUniqueId=robot_id,
         parentLinkIndex=platform_id,
@@ -212,9 +218,9 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         childLinkIndex=-1,
         jointType=p.JOINT_FIXED,
         jointAxis=[0,0,0],
-        parentFramePosition=[0,0,0],
-        childFramePosition=base_pos,
-        parentFrameOrientation=base_orn,
+        parentFramePosition=rel_pos,
+        childFramePosition=[0,0,0],
+        parentFrameOrientation=rel_orn,
         childFrameOrientation=[0,0,0,1]
     )
 
@@ -244,6 +250,10 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
     else:
         base_pos_new, base_orn_new = p.getBasePositionAndOrientation(robot_id)
 
+    # --- 修正：用当前实际相对位姿 ---
+    plane_pos2, plane_orn2 = p.getBasePositionAndOrientation(plane_id)
+    inv_link_pos2, inv_link_orn2 = p.invertTransform(base_pos_new, base_orn_new)
+    rel_pos2, rel_orn2 = p.multiplyTransforms(inv_link_pos2, inv_link_orn2, plane_pos2, plane_orn2)
     cid_end_plane2 = p.createConstraint(
         parentBodyUniqueId=robot_id,
         parentLinkIndex=platform_id_new,
@@ -251,9 +261,9 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         childLinkIndex=-1,
         jointType=p.JOINT_FIXED,
         jointAxis=[0,0,0],
-        parentFramePosition=[0,0,0],
-        childFramePosition=base_pos_new,
-        parentFrameOrientation=base_orn_new,
+        parentFramePosition=rel_pos2,
+        childFramePosition=[0,0,0],
+        parentFrameOrientation=rel_orn2,
         childFrameOrientation=[0,0,0,1]
     )
 
@@ -265,6 +275,9 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
 
     cur3 = p.getJointState(robot_id, joint_ids[3])[0]
     move_joint(robot_id, joint_ids[3], cur3 - theta1, steps=120)
+
+    cur = p.getJointState(robot_id, joint_ids[0])[0]
+    move_joint(robot_id, joint_ids[0], cur - theta0, steps=120)
 
 
     # 3. 解除end_platform与地面的约束
