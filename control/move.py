@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 import time
 import pybullet as p
 from config_loader import load_config
@@ -59,6 +60,83 @@ def goto(robot_id: int, target_pos: list[float], speed: float = 0.005, tolerance
     
     return (False, cur_pos)
 
+def move_joint(robot_id: int, joint_index: int, target_angle: float, 
+               steps: int = 100, speed: float = 2.5) -> None:
+    """
+    平滑地移动指定关节到目标角度
+    
+    Args:
+        robot_id: 机器人ID
+        joint_index: 关节索引
+        target_angle: 目标角度(弧度)
+        steps: 运动步数
+        speed: 关节运动速度
+    """
+    cfg = load_config()
+    sim_cfg = cfg["simulation"]
+    time_step = sim_cfg["time_step"]
+    
+    # 先获取当前角度
+    cur_angle = p.getJointState(robot_id, joint_index)[0]
+    direction = 1 if target_angle > cur_angle else -1
+    tol = 0.01  # 容许误差
+    max_steps = steps * 3
+    max_force = 1000
+    num_joints = p.getNumJoints(robot_id)
+    # 锁定除当前关节外的所有关节
+    for j in range(num_joints):
+        if j == joint_index:
+            continue
+        joint_info = p.getJointInfo(robot_id, j)
+        joint_type = joint_info[2]
+        if joint_type == p.JOINT_REVOLUTE or joint_type == p.JOINT_PRISMATIC:
+            cur_pos = p.getJointState(robot_id, j)[0]
+            p.setJointMotorControl2(
+                robot_id,
+                j,
+                p.POSITION_CONTROL,
+                targetPosition=cur_pos,
+                force=max_force
+            )
+    for i in range(max_steps):
+        cur_angle = p.getJointState(robot_id, joint_index)[0]
+        err = target_angle - cur_angle
+        dist = abs(err)
+        # 设定减速区间
+        slow_zone = 0.3  # 距目标小于此值开始减速
+        min_speed = 0.01 * abs(speed)
+        # 速度规划：距离越近速度越小，到达目标前速度已降为0
+        if dist < tol:
+            p.setJointMotorControl2(
+                robot_id,
+                joint_index,
+                p.VELOCITY_CONTROL,
+                targetVelocity=0,
+                force=max_force
+            )
+            break
+        if dist < slow_zone:
+            v = direction * max(min_speed, abs(speed) * (dist / slow_zone))
+        else:
+            v = direction * abs(speed)
+        p.setJointMotorControl2(
+            robot_id,
+            joint_index,
+            p.VELOCITY_CONTROL,
+            targetVelocity=v,
+            force=max_force
+        )
+        p.stepSimulation()
+        time.sleep(time_step)
+    # 最后确保速度为0
+    p.setJointMotorControl2(
+        robot_id,
+        joint_index,
+        p.VELOCITY_CONTROL,
+        targetVelocity=0,
+        force=max_force
+    )
+
 def move_base_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step: float) -> None:
     start_pos, start_orn = p.getBasePositionAndOrientation(obj)
 
@@ -97,8 +175,107 @@ def move_base_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_st
         p.stepSimulation()
         time.sleep(time_step)
 
-def move_rob_tar(robot_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
-    time.sleep(time_step)
+
+def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None:
+    base_platform_idx = -1
+    end_platform_idx = 9
+
+    if base_id == base_platform_idx:
+        base_pos, base_orn = p.getBasePositionAndOrientation(robot_id)
+        link_state = p.getLinkState(robot_id, end_platform_idx)
+        platform_id = base_id
+        platform_id_new = end_platform_idx
+
+        theta0 = math.radians(ang)
+        theta1 = math.radians(30)
+        theta2 = math.radians(120)
+
+        joint_ids = [0, 7, 4, 1]
+
+    else:
+        link_state = p.getLinkState(robot_id, end_platform_idx)
+        base_pos, base_orn = link_state[0], link_state[1]
+
+        platform_id = base_id
+        platform_id_new = base_platform_idx
+
+        theta0 = -math.radians(ang)
+        theta1 = -math.radians(30)
+        theta2 = -math.radians(120)
+
+        joint_ids = [6, 1, 4, 7]
+
+    cid_base_plane = p.createConstraint(
+        parentBodyUniqueId=robot_id,
+        parentLinkIndex=platform_id,
+        childBodyUniqueId=plane_id,
+        childLinkIndex=-1,
+        jointType=p.JOINT_FIXED,
+        jointAxis=[0,0,0],
+        parentFramePosition=[0,0,0],
+        childFramePosition=base_pos,
+        parentFrameOrientation=base_orn,
+        childFrameOrientation=[0,0,0,1]
+    )
+
+    cur = p.getJointState(robot_id, joint_ids[0])[0]
+    move_joint(robot_id, joint_ids[0], cur + theta0, steps=120)
+    
+    cur1 = p.getJointState(robot_id, joint_ids[1])[0]
+    move_joint(robot_id, joint_ids[1], cur1 + theta1, steps=120)
+
+    # j2_single +120°
+    cur2 = p.getJointState(robot_id, joint_ids[2])[0]
+    move_joint(robot_id, joint_ids[2], cur2 + theta2, steps=240)
+
+    # j1_x +30°
+    cur3 = p.getJointState(robot_id, joint_ids[3])[0]
+    move_joint(robot_id, joint_ids[3], cur3 + theta1, steps=120)
+
+    p.removeConstraint(cid_base_plane)
+
+    if base_id == base_platform_idx:
+        link_state = p.getLinkState(robot_id, end_platform_idx)
+        base_pos_new, base_orn_new = link_state[0], link_state[1]
+    else:
+        base_pos_new, base_orn_new = p.getBasePositionAndOrientation(robot_id)
+
+    cid_end_plane2 = p.createConstraint(
+        parentBodyUniqueId=robot_id,
+        parentLinkIndex=platform_id_new,
+        childBodyUniqueId=plane_id,
+        childLinkIndex=-1,
+        jointType=p.JOINT_FIXED,
+        jointAxis=[0,0,0],
+        parentFramePosition=[0,0,0],
+        childFramePosition=base_pos_new,
+        parentFrameOrientation=base_orn_new,
+        childFrameOrientation=[0,0,0,1]
+    )
+
+    for _ in range(240):  # 假设仿真步长为1/240s，这里相当于1秒
+        p.stepSimulation()
+        time.sleep(1/240)
+
+    cur1 = p.getJointState(robot_id, joint_ids[1])[0]
+    move_joint(robot_id, joint_ids[1], cur1 - theta1, steps=120)
+
+    cur2 = p.getJointState(robot_id, joint_ids[2])[0]
+    move_joint(robot_id, joint_ids[2], cur2 - theta2, steps=240)
+
+    cur3 = p.getJointState(robot_id, joint_ids[3])[0]
+    move_joint(robot_id, joint_ids[3], cur3 - theta1, steps=120)
+
+
+    # 3. 解除end_platform与地面的约束
+    p.removeConstraint(cid_end_plane2)
+
+    if base_id == base_platform_idx:
+        return end_platform_idx
+    else:
+        return base_platform_idx
+
+
 
 def rotate_base(base_id: int, angle: float) -> None:
     sim_cfg = cfg["simulation"]

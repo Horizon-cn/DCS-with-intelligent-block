@@ -108,36 +108,46 @@ def drop_cube(top_cube, robotid, obj_dicts) -> None:
     set_cube_collisions(top_cube, robotid, obj_dicts["plane"], enabled=True)
     reset_cube_velocity(top_cube)
 
-def try_glue(body_a, body_b):
+def try_glue(body_a, body_b, link_a: int = -1, link_b: int = -1):
+    """
+    在 body_a 的 link_a 和 body_b 的 link_b 之间创建固定约束，实现“粘合”。
+    link_a/link_b = -1 表示 base。
+    """
+    # 获取世界坐标下的 parent/child 位姿
+    if link_a == -1:
+        pos_a, orn_a = p.getBasePositionAndOrientation(body_a)
+    else:
+        state_a = p.getLinkState(body_a, link_a)
+        pos_a, orn_a = state_a[0], state_a[1]
 
-    contacts = p.getContactPoints(bodyA=body_a, bodyB=body_b)
+    if link_b == -1:
+        pos_b, orn_b = p.getBasePositionAndOrientation(body_b)
+    else:
+        state_b = p.getLinkState(body_b, link_b)
+        pos_b, orn_b = state_b[0], state_b[1]
 
-    # 用当前世界位姿计算 parent->child 的相对位姿，保证“当前姿态下粘住”
-    pos_a, orn_a = p.getBasePositionAndOrientation(body_a)
-    pos_b, orn_b = p.getBasePositionAndOrientation(body_b)
-
+    # 计算 parent->child 的相对位姿
     inv_a_pos, inv_a_orn = p.invertTransform(pos_a, orn_a)
     child_pos_in_a, child_orn_in_a = p.multiplyTransforms(inv_a_pos, inv_a_orn, pos_b, orn_b)
 
     glue_cid = p.createConstraint(
         parentBodyUniqueId=body_a,
-        parentLinkIndex=-1,
+        parentLinkIndex=link_a,
         childBodyUniqueId=body_b,
-        childLinkIndex=-1,
+        childLinkIndex=link_b,
         jointType=p.JOINT_FIXED,
         jointAxis=[0, 0, 0],
-        # Use current relative transform as the parent frame so the constraint
-        # starts with near-zero position/orientation error.
         parentFramePosition=child_pos_in_a,
         childFramePosition=[0, 0, 0],
         parentFrameOrientation=child_orn_in_a,
         childFrameOrientation=[0, 0, 0, 1],
     )
-
-    # Prevent contact solver and fixed-constraint solver from fighting.
-    p.setCollisionFilterPair(body_a, body_b, -1, -1, 0)
+    # 禁用碰撞
+    p.setCollisionFilterPair(body_a, body_b, link_a, link_b, 0)
     p.changeConstraint(glue_cid, maxForce=200)
     return glue_cid
+
+
 
 def unglue(glue_cid: int | None, body_a: int | None = None, body_b: int | None = None) -> None:
     if glue_cid is None:
@@ -413,6 +423,7 @@ class DynamicMoveToTargetTask:
                         continue
 
                 waypoint = self.path[self.current_i].pos
+                facedir = self.path[self.current_i].face_dir
                 target_3d = [waypoint[0]+0.5, waypoint[1]+0.5, waypoint[2]]
 
                 # Advance index only when current path point is reached.

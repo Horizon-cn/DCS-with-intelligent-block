@@ -190,3 +190,25 @@ class rob_info:
         move_steps = cfg["motion"]["move_steps"]
         move_base_tar(self.robot_id, target_pos, [0, 0, 0, 1], max(1, move_steps // 3), time_step)
         
+@dataclass
+class rob_new_info:
+    robot_id: int
+    base_id: int
+    cube_picked: dict[int, bool]
+    has_load: bool = False
+    load_cube_id: int | None = None
+    glue_cid: int | None = None
+
+    def glue_to_cube(self, cube_id: int) -> None:
+        self.glue_cid = try_glue(self.robot_id, cube_id, link_a=self.base_id, link_b=-1)
+    
+    def rotate(self, angle: float) -> None:
+        rotate_to(self.robot_id, angle)
+
+    def move_dir(self, target_pos: List[float], target_dir: List[float]) -> None:
+            sim_cfg = cfg["simulation"]
+            time_step = sim_cfg["time_step"]
+            move_steps = cfg["motion"]["move_steps"]
+            self.base_id = move_rob_dir(self.robot_id, self.base_id, target_pos, target_dir, max(1, move_steps // 3), time_step)
+
+
