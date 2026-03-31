@@ -76,14 +76,14 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
     sim_cfg = cfg["simulation"]
     time_step = sim_cfg["time_step"]
     
-    # 先获取当前角度
+
     cur_angle = p.getJointState(robot_id, joint_index)[0]
     direction = 1 if target_angle > cur_angle else -1
-    tol = 0.01  # 容许误差
+    tol = 0.01  
     max_steps = steps * 3
     max_force = 1000
     num_joints = p.getNumJoints(robot_id)
-    # 锁定除当前关节外的所有关节
+
     for j in range(num_joints):
         if j == joint_index:
             continue
@@ -102,10 +102,10 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
         cur_angle = p.getJointState(robot_id, joint_index)[0]
         err = target_angle - cur_angle
         dist = abs(err)
-        # 设定减速区间
-        slow_zone = 0.3  # 距目标小于此值开始减速
+
+        slow_zone = 0.3 
         min_speed = 0.01 * abs(speed)
-        # 速度规划：距离越近速度越小，到达目标前速度已降为0
+
         if dist < tol:
             p.setJointMotorControl2(
                 robot_id,
@@ -128,7 +128,7 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
         )
         p.stepSimulation()
         time.sleep(time_step)
-    # 最后确保速度为0
+
     p.setJointMotorControl2(
         robot_id,
         joint_index,
@@ -205,10 +205,9 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
 
         joint_ids = [8, 1, 4, 7]
 
-    # --- 修正：用当前实际相对位姿 ---
-    # 获取地面（plane_id）世界位姿
+
     plane_pos, plane_orn = p.getBasePositionAndOrientation(plane_id)
-    # 计算plane在link下的相对位姿
+
     inv_link_pos, inv_link_orn = p.invertTransform(base_pos, base_orn)
     rel_pos, rel_orn = p.multiplyTransforms(inv_link_pos, inv_link_orn, plane_pos, plane_orn)
     cid_base_plane = p.createConstraint(
@@ -240,7 +239,7 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
 
     p.removeConstraint(cid_base_plane)
 
-    for _ in range(120):  # 假设仿真步长为1/240s，这里相当于1秒
+    for _ in range(120):  
         p.stepSimulation()
         time.sleep(1/240)
 
@@ -250,7 +249,6 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
     else:
         base_pos_new, base_orn_new = p.getBasePositionAndOrientation(robot_id)
 
-    # --- 修正：用当前实际相对位姿 ---
     plane_pos2, plane_orn2 = p.getBasePositionAndOrientation(plane_id)
     inv_link_pos2, inv_link_orn2 = p.invertTransform(base_pos_new, base_orn_new)
     rel_pos2, rel_orn2 = p.multiplyTransforms(inv_link_pos2, inv_link_orn2, plane_pos2, plane_orn2)
@@ -280,10 +278,9 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
     move_joint(robot_id, joint_ids[0], cur - theta0, steps=120)
 
 
-    # 3. 解除end_platform与地面的约束
     p.removeConstraint(cid_end_plane2)
 
-    for _ in range(120):  # 假设仿真步长为1/240s，这里相当于1秒
+    for _ in range(120):
         p.stepSimulation()
         time.sleep(1/240)
 

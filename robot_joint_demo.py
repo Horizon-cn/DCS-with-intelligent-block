@@ -18,6 +18,9 @@ from config_loader import load_config
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
 from control.motion import _set_collision_with_all
 from control.move import move_joint, move_rob_dir
+from factory import *
+import numpy as np
+import random
 
 
 def print_joint_info(robot_id: int) -> None:
@@ -51,10 +54,29 @@ def demo_joint_motion() -> None:
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
     robot_id = p.loadURDF(
         new_robot_urdf,
-        basePosition=[0, 0, 0],
+        basePosition=[0, 0, 0.5],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,  # 固定基座以便观察关节运动
     )
+
+    cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
+    # 2D stack grid: cube_stacks[x][y] -> one stack(list[int]).
+    X, Y, Z = 5, 5, 5
+    occ = np.zeros((X, Y, Z), dtype=np.uint8)
+    cube_stacks = [[[] for _ in range(Y)] for _ in range(X)]
+    for x in range(X):
+        for y in range(Y):
+            z = random.randint(1, Z-2)
+            cube_stacks[x][y] = create_cube_stack(
+                cubev_shape_id,
+                cubec_shape_id,
+                cfg["cube"],
+                cfg["stack"],
+                sim_cfg["use_maximal_coordinates"],
+                z=z,
+                base_pos=[(x + 1) * 1.0, (y + 1) * 1.0, 0.1],
+            )
+            occ[x, y, 0:z] = 1
     
     print("=" * 80)
     print("Robot Joint Motion Demo")
@@ -255,7 +277,6 @@ def demo_joint_motion() -> None:
         new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
     new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
-    # 保持仿真运行，方便观察
     for _ in range(200):
         p.stepSimulation()
         time.sleep(sim_cfg["time_step"])
