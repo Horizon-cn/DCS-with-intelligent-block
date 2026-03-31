@@ -17,7 +17,7 @@ from pathlib import Path
 from config_loader import load_config
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
 from control.motion import _set_collision_with_all
-from control.move import move_joint, move_rob_dir
+from control.move import move_joint, move_rob_dir, move_rob_to_cube_side_xplus
 from factory import *
 import numpy as np
 import random
@@ -54,9 +54,18 @@ def demo_joint_motion() -> None:
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
     robot_id = p.loadURDF(
         new_robot_urdf,
-        basePosition=[0, 0, 0.5],
+        basePosition=[-3, -3, 1],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,  # 固定基座以便观察关节运动
+    )
+
+    cubev_shape_id, cubec_shape_id = create_cube_shapes_org(cfg["cube_org"])
+    cube_id = create_cube_org(
+        cubev_shape_id,
+        cubec_shape_id,
+        cfg["cube_org"],
+        [-3, -3, 0.5],
+        sim_cfg["use_maximal_coordinates"],
     )
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
@@ -271,11 +280,13 @@ def demo_joint_motion() -> None:
     #     p.stepSimulation()
     #     time.sleep(sim_cfg["time_step"])
 
-    new_base = move_rob_dir(robot_id, -1, 30, plane_id)
+    move_rob_to_cube_side_xplus(robot_id, plane_id, cube_id)
 
-    for i in range(2):
-        new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
-    new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
+    # new_base = move_rob_dir(robot_id, -1, 30, plane_id)
+
+    # for i in range(2):
+    #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
+    # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
     for _ in range(200):
         p.stepSimulation()

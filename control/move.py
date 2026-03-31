@@ -290,6 +290,138 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         return base_platform_idx
 
 
+def move_rob_to_cube_side_xplus(robot_id: int, plane_id: int, cube_id: int) -> int:
+    """
+    从 demo 初始状态出发:
+    1. 先将 base_platform 固定在当前顶部位置；
+    2. 弯折机器人，让 end_platform 贴到当前立方体的 +x 侧面；
+    3. 将 end_platform 固定到该侧面；
+    4. 在 end_platform 固定后，将关节展开回初始角度。
+
+    返回最终 end_platform 与 plane 的约束 id。
+    """
+    base_platform_idx = -1
+    end_platform_idx = 9
+
+    base_pos, base_orn = p.getBasePositionAndOrientation(robot_id)
+    platform_id = base_platform_idx
+    platform_id_new = end_platform_idx
+
+    # demo 初始状态中，机器人站在边长 1 的立方体上表面中心。
+    # cube_half_extent = 0.5
+    # platform_half_thickness = 0.05
+    # side_target_pos = [
+    #     base_pos[0] + cube_half_extent + platform_half_thickness,
+    #     base_pos[1],
+    #     cube_half_extent,
+    # ]
+    # side_delta_orn = p.getQuaternionFromEuler([0, +math.pi / 2, 0])
+    # _, side_target_orn = p.multiplyTransforms([0, 0, 0], base_orn, [0, 0, 0], side_delta_orn)
+
+    # ik_solution = p.calculateInverseKinematics(
+    #     robot_id,
+    #     end_platform_idx,
+    #     side_target_pos,
+    #     side_target_orn,
+    #     maxNumIterations=200,
+    #     residualThreshold=1e-5,
+    # )
+
+    # joint_targets = {
+    #     0: ik_solution[0],
+    #     1: ik_solution[1],
+    #     4: ik_solution[3],
+    #     7: ik_solution[5],
+    #     8: ik_solution[6],
+    # }
+
+    # theta0 = joint_targets[0] - p.getJointState(robot_id, 0)[0]
+    # theta1 = joint_targets[1] - p.getJointState(robot_id, 1)[0]
+    # theta2 = joint_targets[4] - p.getJointState(robot_id, 4)[0]
+    # theta4 = joint_targets[7] - p.getJointState(robot_id, 7)[0]
+    # theta5 = joint_targets[8] - p.getJointState(robot_id, 8)[0]
+
+    # print(f"Calculated IK joint deltas: theta0={math.degrees(theta0):.2f}°, theta1={math.degrees(theta1):.2f}°, "
+    #       f"theta2={math.degrees(theta2):.2f}°, theta4={math.degrees(theta4):.2f}°, theta5={math.degrees(theta5):.2f}°")
+
+    plane_pos, plane_orn = p.getBasePositionAndOrientation(plane_id)
+
+    inv_plane_pos, inv_plane_orn = p.invertTransform(plane_pos, plane_orn)
+    child_pos, child_orn = p.multiplyTransforms(inv_plane_pos, inv_plane_orn, base_pos, base_orn)
+    cid_base_plane = p.createConstraint(
+        parentBodyUniqueId=robot_id,
+        parentLinkIndex=platform_id,
+        childBodyUniqueId=plane_id,
+        childLinkIndex=-1,
+        jointType=p.JOINT_FIXED,
+        jointAxis=[0, 0, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=child_pos,
+        parentFrameOrientation=[0, 0, 0, 1],
+        childFrameOrientation=child_orn
+    )
+
+    # cur = p.getJointState(robot_id, 0)[0]
+    # move_joint(robot_id, 0, cur, steps=120)
+
+    cur1 = p.getJointState(robot_id, 1)[0]
+    move_joint(robot_id, 1, cur1 + math.radians(90), steps=180)
+
+    cur2 = p.getJointState(robot_id, 4)[0]
+    move_joint(robot_id, 4, cur2 + math.radians(90), steps=240)
+
+    cur3 = p.getJointState(robot_id, 7)[0]
+    move_joint(robot_id, 7, cur3 + math.radians(90), steps=180)
+
+    # cur4 = p.getJointState(robot_id, 8)[0]
+    # move_joint(robot_id, 8, cur4, steps=120)
+
+    for _ in range(120):
+        p.stepSimulation()
+        time.sleep(1 / 240)
+
+    end_state = p.getLinkState(robot_id, end_platform_idx)
+    end_pos, end_orn = end_state[0], end_state[1]
+    plane_pos, plane_orn = p.getBasePositionAndOrientation(plane_id)
+    inv_plane_pos, inv_plane_orn = p.invertTransform(plane_pos, plane_orn)
+    child_pos2, child_orn2 = p.multiplyTransforms(inv_plane_pos, inv_plane_orn, end_pos, end_orn)
+    cid_end_cube = p.createConstraint(
+        parentBodyUniqueId=robot_id,
+        parentLinkIndex=platform_id_new,
+        childBodyUniqueId=plane_id,
+        childLinkIndex=-1,
+        jointType=p.JOINT_FIXED,
+        jointAxis=[0, 0, 0],
+        parentFramePosition=[0, 0, 0],
+        childFramePosition=child_pos2,
+        parentFrameOrientation=[0, 1, 0, 0],
+        childFrameOrientation=child_orn2
+    )
+
+    p.removeConstraint(cid_base_plane)
+
+    cur3 = p.getJointState(robot_id, 7)[0]
+    move_joint(robot_id, 7, cur3 - math.radians(90), steps=180)
+
+    cur2 = p.getJointState(robot_id, 4)[0]
+    move_joint(robot_id, 4, cur2 - math.radians(90), steps=240)
+
+    cur1 = p.getJointState(robot_id, 1)[0]
+    move_joint(robot_id, 1, cur1 - math.radians(90), steps=180)
+
+    # cur4 = p.getJointState(robot_id, 8)[0]
+    # move_joint(robot_id, 8, cur4 - math.radians(90), steps=120)
+
+    # cur = p.getJointState(robot_id, 0)[0]
+    # move_joint(robot_id, 0, cur, steps=120)
+
+    for _ in range(120):
+        p.stepSimulation()
+        time.sleep(1 / 240)
+
+    return cid_end_cube
+
+
 
 def rotate_base(base_id: int, angle: float) -> None:
     sim_cfg = cfg["simulation"]
