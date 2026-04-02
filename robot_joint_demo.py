@@ -59,11 +59,11 @@ def demo_joint_motion() -> None:
         useFixedBase=False,  # 固定基座以便观察关节运动
     )
 
-    cubev_shape_id, cubec_shape_id = create_cube_shapes_org(cfg["cube_org"])
-    cube_id = create_cube_org(
+    cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
+    cube_id = create_cube(
         cubev_shape_id,
         cubec_shape_id,
-        cfg["cube_org"],
+        cfg["cube"],
         [-3, -3, 0.5],
         sim_cfg["use_maximal_coordinates"],
     )

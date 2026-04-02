@@ -116,11 +116,11 @@ def main() -> None:
     configure_visualizer(cfg["visualizer"], enable_rendering=True)
     step_simulation(600, sim_cfg["time_step"])
 
-    # new_base = move_rob_dir(robot_id, -1, 30, plane_id)
+    new_base = move_rob_dir(robot_id, -1, 30, plane_id)
 
-    # for i in range(2):
-    #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
-    # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
+    for i in range(2):
+        new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
+    new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
     planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
     planner.plan_from_current()  # Initialize planning

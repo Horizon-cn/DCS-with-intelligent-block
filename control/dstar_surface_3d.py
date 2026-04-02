@@ -1,4 +1,5 @@
 import heapq
+import math
 import random
 from dataclasses import dataclass
 from typing import Tuple, List, Dict, Optional, Set
@@ -31,16 +32,9 @@ EDGE_DIRS = {
 
 @dataclass(frozen=True)
 class Node:
-    """A planning node: free-cell center position + direction toward an adjacent obstacle surface."""
+    """A planning node is a specific exposed face adjacent to a free voxel."""
     pos: Tuple[float, float, float]
     face_dir: str
-
-    def __hash__(self):
-        # Same position is the same planning point regardless of face direction.
-        return hash(self.pos)
-
-    def __eq__(self, other):
-        return isinstance(other, Node) and self.pos == other.pos
 
 
 class LazyPQ:
@@ -81,11 +75,11 @@ class DStarLiteSurface3D:
         occ: 3D occupancy container supporting occ[x,y,z] -> 0/1 (free/blocked)
              e.g. numpy array with shape (X,Y,Z) or dict-like with __getitem__
         size_xyz: (X,Y,Z)
-        start/goal: Node=((x,y,z), face) on an obstacle voxel and must be an exposed face.
+        start/goal: Node((x,y,z), face) where each node is one valid exposed face.
         """
         self.occ = occ
         self.X, self.Y, self.Z = size_xyz
-        self.visited = [[[False for _ in range(self.Z)] for _ in range(self.Y)] for _ in range(self.X)]
+        self.visited_faces: Set[Node] = set()
         self.start = start
         self.goal = goal
         # Save original start/goal for visualization (since self.start gets modified during planning)
@@ -129,6 +123,15 @@ class DStarLiteSurface3D:
     def center_to_idx(self, p: Tuple[float, float, float]) -> Tuple[int, int, int]:
         return (int(round(p[0] - 0.5)), int(round(p[1] - 0.5)), int(round(p[2] - 0.5)))
 
+    def node_to_face_midpoint(self, node: Node) -> Tuple[float, float, float]:
+        """Convert a face-node to the geometric midpoint of that face."""
+        n = NORM[node.face_dir]
+        return (
+            node.pos[0] + 0.5 * n[0],
+            node.pos[1] + 0.5 * n[1],
+            node.pos[2] + 0.5 * n[2],
+        )
+
     def available_face_dirs(self, free_v: Tuple[int, int, int]) -> List[str]:
         """Directions from free_v center toward adjacent obstacle surfaces."""
         if not self.in_bounds(free_v) or self.occ_at(free_v) != 0:
@@ -164,34 +167,69 @@ class DStarLiteSurface3D:
         m = min(gs, rs)
         return (m + self.h(self.start, s) + self.km, m)
 
-    # --- successors on the surface graph (1B/2A) ---
+    def _node_from_idx_and_face(self, v: Tuple[int, int, int], face: str) -> Node:
+        return Node(self.idx_to_center(v), face)
+
+    def _candidate_face_nodes(self, free_v: Tuple[int, int, int]) -> List[Node]:
+        """All face nodes on a free voxel, including potentially stale ones for cleanup."""
+        if not self.in_bounds(free_v) or self.occ_at(free_v) != 0:
+            return []
+        return [self._node_from_idx_and_face(free_v, f) for f in FACES]
+
+    def _is_parallel_face_step(self, a: Node, b: Node) -> bool:
+        """Relaxed rule: parallel faces with unit normal offset and close in-plane projection."""
+        if a == b or not self.valid_node(b):
+            return False
+
+        n1 = NORM[a.face_dir]
+        n2 = NORM[b.face_dir]
+        # Require exactly the same face direction.
+        if a.face_dir != b.face_dir:
+            return False
+
+        p1 = self.node_to_face_midpoint(a)
+        p2 = self.node_to_face_midpoint(b)
+        d = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
+
+        # Height difference along the normal direction must be exactly 1.
+        dn = d[0] * n1[0] + d[1] * n1[1] + d[2] * n1[2]
+        if abs(abs(dn) - 1.0) > 1e-9:
+            return False
+
+        # Distance between projected points on the face plane must be in (0, 2).
+        tang = (
+            d[0] - dn * n1[0],
+            d[1] - dn * n1[1],
+            d[2] - dn * n1[2],
+        )
+        proj_dist = math.sqrt(tang[0] * tang[0] + tang[1] * tang[1] + tang[2] * tang[2])
+        return 0.0 < proj_dist < 2.0
+
+    # --- successors on the surface graph ---
     def successors(self, node: Node) -> List[Node]:
+        if not self.valid_node(node):
+            return []
+
         u = self.center_to_idx(node.pos)
         out: List[Node] = []
 
-        # At a point, all available face directions can be used for next-step expansion.
-        usable_dirs = self.available_face_dirs(u)
-        if not usable_dirs:
+        # Node is a face, so expansion starts from this exact face.
+        d_face = node.face_dir
+        if d_face not in self.available_face_dirs(u):
             return out
 
-        # Slide on free layer along in-plane edge directions of each usable face.
-        for d_face in usable_dirs:
-            for step_d in EDGE_DIRS[d_face]:
-                u2 = self.addv(u, step_d)
-                if not self.in_bounds(u2) or self.occ_at(u2) != 0:
-                    continue
-
-                for d2 in self.available_face_dirs(u2):
-                    if not self.visited[u2[0]][u2[1]][u2[2]]:
-                        out.append(Node(self.idx_to_center(u2), d2))
-
-        # Edge flip: move around a right-angle edge of the same obstacle voxel
-        # from face d_face to an orthogonal face f2.
-        for d_face in usable_dirs:
-            obs_v = self.addv(u, NORM[d_face])
-            if not self.in_bounds(obs_v) or self.occ_at(obs_v) != 1:
+        # Step type 1: slide while keeping the same face.
+        for step_d in EDGE_DIRS[d_face]:
+            u2 = self.addv(u, step_d)
+            if not self.in_bounds(u2) or self.occ_at(u2) != 0:
                 continue
+            s2 = self._node_from_idx_and_face(u2, d_face)
+            if self.valid_node(s2) and s2 not in self.visited_faces:
+                out.append(s2)
 
+        # Step type 2: edge-flip to an orthogonal face around the same obstacle voxel.
+        obs_v = self.addv(u, NORM[d_face])
+        if self.in_bounds(obs_v) and self.occ_at(obs_v) == 1:
             n1 = NORM[d_face]
             for f2 in FACES:
                 if f2 == d_face:
@@ -200,13 +238,26 @@ class DStarLiteSurface3D:
                 if n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] != 0:
                     continue  # only orthogonal faces share a right-angle edge
 
-                # free cell adjacent to same obstacle voxel on face f2
                 u2 = (obs_v[0] - n2[0], obs_v[1] - n2[1], obs_v[2] - n2[2])
                 if not self.in_bounds(u2) or self.occ_at(u2) != 0:
                     continue
-                if f2 in self.available_face_dirs(u2):
-                    if not self.visited[u2[0]][u2[1]][u2[2]]:
-                        out.append(Node(self.idx_to_center(u2), f2))
+                s2 = self._node_from_idx_and_face(u2, f2)
+                if self.valid_node(s2) and s2 not in self.visited_faces:
+                    out.append(s2)
+
+        # Step type 3 (relaxed): jump to a nearby parallel face if geometric constraints match.
+        for dx in (-2, -1, 0, 1, 2):
+            for dy in (-2, -1, 0, 1, 2):
+                for dz in (-2, -1, 0, 1, 2):
+                    v2 = (u[0] + dx, u[1] + dy, u[2] + dz)
+                    if not self.in_bounds(v2) or self.occ_at(v2) != 0:
+                        continue
+                    for f2 in FACES:
+                        s2 = self._node_from_idx_and_face(v2, f2)
+                        if s2 in self.visited_faces:
+                            continue
+                        if self._is_parallel_face_step(node, s2):
+                            out.append(s2)
 
         # Optional: deduplicate (important when many candidates)
         # keep stable order
@@ -223,6 +274,7 @@ class DStarLiteSurface3D:
         # If b is invalid, treat as blocked
         if not self.valid_node(b):
             return INF
+        # Disallow switching faces at the same free-voxel center.
         if a.pos == b.pos:
             return INF
         return 1
@@ -402,19 +454,19 @@ class DStarLiteSurface3D:
         # --- draw obstacles ---
         ax.voxels(occ_np, alpha=0.5)
 
-        # --- draw path as line ---
+        # --- draw path as line through face midpoints ---
         if path:
-            pts = np.array([n.pos for n in path], dtype=float)
+            pts = np.array([self.node_to_face_midpoint(n) for n in path], dtype=float)
             ax.plot(pts[:, 0], pts[:, 1], pts[:, 2])
             
             # Draw only intermediate path points (exclude start and goal)
             if len(path) > 2:
-                pts_mid = np.array([n.pos for n in path[1:-1]], dtype=float)
+                pts_mid = np.array([self.node_to_face_midpoint(n) for n in path[1:-1]], dtype=float)
                 ax.scatter(pts_mid[:, 0], pts_mid[:, 1], pts_mid[:, 2], s=20, alpha=0.6)
 
-        # --- mark original start/goal (use start_orig/goal_orig to preserve original positions) ---
-        sx, sy, sz = self.start_orig.pos
-        gx, gy, gz = self.goal_orig.pos
+        # --- mark original start/goal at face midpoints ---
+        sx, sy, sz = self.node_to_face_midpoint(self.start_orig)
+        gx, gy, gz = self.node_to_face_midpoint(self.goal_orig)
         ax.scatter([sx], [sy], [sz], s=80, marker="o", label="start", color="green")  # start
         ax.scatter([gx], [gy], [gz], s=80, marker="^", label="goal", color="red")  # goal
 
@@ -450,8 +502,7 @@ class DStarLiteSurface3D:
         old = self.start
         self.start = new_start
         self.km += self.h(old, new_start)
-        u = self.center_to_idx(new_start.pos)
-        self.visited[u[0]][u[1]][u[2]] = True  # book-keeping, not required for algorithm
+        self.visited_faces.add(new_start)  # book-keeping, not required for algorithm
 
         self.compute_shortest_path()
 
@@ -488,14 +539,8 @@ class DStarLiteSurface3D:
                 continue
             if self.occ_at(vv) != 0:
                 continue
-            dirs = self.available_face_dirs(vv)
-            for f in dirs:
-                affected_nodes.add(Node(self.idx_to_center(vv), f))
-
-            # Keep old keys around for cleanup when a point loses all faces.
-            probe = Node(self.idx_to_center(vv), "+X")
-            if probe in self.g or probe in self.rhs:
-                affected_nodes.add(probe)
+            for n in self._candidate_face_nodes(vv):
+                affected_nodes.add(n)
 
         for n in affected_nodes:
             if self.valid_node(n):
@@ -567,16 +612,9 @@ class DStarLiteSurface3D:
                 continue
             if self.occ_at(vv) != 0:
                 continue
-            
-            # Get current directions
-            dirs = self.available_face_dirs(vv)
-            for f in dirs:
-                affected_nodes.add(Node(self.idx_to_center(vv), f))
-            
-            # Keep old keys for cleanup
-            probe = Node(self.idx_to_center(vv), "+X")
-            if probe in self.g or probe in self.rhs:
-                affected_nodes.add(probe)
+
+            for n in self._candidate_face_nodes(vv):
+                affected_nodes.add(n)
         
         # Fourth pass: update vertices (accumulate affected nodes, don't replan yet)
         for n in affected_nodes:
@@ -627,8 +665,8 @@ if __name__ == "__main__":
             z = random.randint(1, Z-2)
             occ[x, y, 0:z] = 1
 
-    # Start/Goal are (free-cell center, direction-to-obstacle-face)
-    valid_nodes = []
+    # Start/Goal are two valid face nodes: Node((free-cell-center), face_dir)
+    valid_faces = []
     for x in range(X):
         for y in range(Y):
             for zc in range(Z):
@@ -637,15 +675,15 @@ if __name__ == "__main__":
                 for f in FACES:
                     ox, oy, oz = x + NORM[f][0], y + NORM[f][1], zc + NORM[f][2]
                     if 0 <= ox < X and 0 <= oy < Y and 0 <= oz < Z and occ[ox, oy, oz] == 1:
-                        valid_nodes.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
+                        valid_faces.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
 
-    if len(valid_nodes) < 2:
-        raise RuntimeError("Not enough valid nodes to sample start and goal.")
+    if len(valid_faces) < 2:
+        raise RuntimeError("Not enough valid faces to sample start and goal.")
 
-    # Ensure different coordinates (same coordinate is treated as same planning point).
+    # Keep generation style but explicitly sample two distinct faces.
     while True:
-        start, goal = random.sample(valid_nodes, 2)
-        if start.pos != goal.pos:
+        start, goal = random.sample(valid_faces, 2)
+        if start != goal:
             break
     print(f"Random start={start}, goal={goal}")
 
