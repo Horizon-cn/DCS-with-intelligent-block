@@ -326,17 +326,6 @@ class DynamicMoveToTargetTask:
         self.cruise_z = p.getBasePositionAndOrientation(self.robot_id)[0][2]
         self.step_count = 0
         
-        # Prefer explicitly provided nodes to keep initialization deterministic.
-        if start_node is None:
-            start_node = self._find_closest_node(start_pos)
-        if goal_node is None:
-            goal_node = self._find_closest_node(goal_pos)
-        
-        if start_node is None or goal_node is None:
-            print(f"Warning: Could not find valid start/goal nodes. Start={start_node}, Goal={goal_node}")
-            self.reached = True
-            return
-        
         # Initialize D* Lite planner
         try:
             self.planner = DStarLiteSurface3D(self.occ, self.size_xyz, start_node, goal_node)
@@ -359,9 +348,9 @@ class DynamicMoveToTargetTask:
         """
         x, y, z = pos
         # Use center-based integer anchor for neighborhood expansion.
-        grid_x = int(round(x - 0.5))
-        grid_y = int(round(y - 0.5))
-        grid_z = int(round(z - 0.5))
+        grid_x = int(round(x))
+        grid_y = int(round(y))
+        grid_z = int(round(z))
 
         def in_bounds(vx: int, vy: int, vz: int) -> bool:
             return (

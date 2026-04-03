@@ -6,32 +6,49 @@ from pathlib import Path
 
 from factory import *
 from config_loader import load_config
-from control.motion import get_top_cube
+from control.motion import _set_collision_with_all_links
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
 from control.dstar_surface_3d import *
 
 cube_picked: dict[int, bool] = {}
 
 
+def _quat_from_to(src: tuple[float, float, float], dst: tuple[float, float, float]):
+    """Return quaternion (x, y, z, w) rotating unit vector src -> dst."""
+    sx, sy, sz = src
+    dx, dy, dz = dst
+    dot = sx * dx + sy * dy + sz * dz
+
+    # 180-degree case: pick a deterministic axis orthogonal to src.
+    if dot < -0.999999:
+        if abs(sx) < 0.9:
+            ax, ay, az = 0.0, -sz, sy
+        else:
+            ax, ay, az = -sy, sx, 0.0
+        n = math.sqrt(ax * ax + ay * ay + az * az)
+        ax, ay, az = ax / n, ay / n, az / n
+        return (ax, ay, az, 0.0)
+
+    cx = sy * dz - sz * dy
+    cy = sz * dx - sx * dz
+    cz = sx * dy - sy * dx
+    qw = 1.0 + dot
+    n = math.sqrt(cx * cx + cy * cy + cz * cz + qw * qw)
+    return (cx / n, cy / n, cz / n, qw / n)
+
+
 def _spawn_pose_from_start_node(node: Node):
     """Map start node (position + face_dir) to robot base spawn pose.
 
-    The robot starts on the start-node face midpoint, and its yaw is set to the
-    opposite direction of ``face_dir`` on the XY plane.
+    The robot starts exactly at the start-node face midpoint, and its base
+    orientation is computed with ``-Z`` as the zero-rotation reference.
     """
     nx, ny, nz = NORM[node.face_dir]
-    # Use face midpoint so spawn position follows start-node surface location.
-    pos = [node.pos[0] - 0.5 * nx, node.pos[1] - 0.5 * ny, node.pos[2] - 0.5 * nz]
+    # Keep position identical to start.face_mid definition.
+    pos = [node.pos[0] + 0.5 * (nx+1), node.pos[1] + 0.5 * (ny+1), node.pos[2] + 0.5 * nz]
 
-    # face_dir points from free voxel center toward the contacted face normal.
-    # Spawn orientation should be opposite to that normal in the XY plane.
-    if nx != 0 or ny != 0:
-        yaw = math.atan2(-ny, -nx)
-    else:
-        # For +/-Z faces keep a stable default yaw.
-        yaw = 0.0
-
-    orn = p.getQuaternionFromEuler([0.0, 0.0, yaw])
+    # Use -Z as the reference orientation: node.face_dir == -Z => identity quaternion.
+    orn = _quat_from_to((0.0, 0.0, -1.0), (float(nx), float(ny), float(nz)))
     return pos, orn
 
 def step_simulation(steps: int, time_step: float) -> None:
@@ -93,6 +110,7 @@ def main() -> None:
         start, goal = random.sample(valid_nodes, 2)
         if start.pos != goal.pos:
             break
+    print(f"Randomly sampled start node: pos={start.pos}, face_dir={start.face_dir}")   
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes_org(cfg["cube_org"])
     cube_id = create_cube_org(
@@ -118,10 +136,12 @@ def main() -> None:
     start_base_pos, start_base_orn = _spawn_pose_from_start_node(start)
     robot2_id = p.loadURDF(
         new_robot_urdf,
-        basePosition=start_base_pos,
-        baseOrientation=start_base_orn,
+        basePosition=[1,8,1],
+        baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,
+        #globalScaling=1.2,
     )
+    #_set_collision_with_all_links(robot2_id, enabled=False)
     
     robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
     rob_num+=1
@@ -149,6 +169,8 @@ def main() -> None:
     planner.plan_from_current()  # Initialize planning
     path = planner.extract_path_stateless(max_steps=100)
     planner.plot_3d_voxels_and_path(path)
+
+    p.resetBasePositionAndOrientation(robot2_id, start_base_pos, start_base_orn)
 
     task = DynamicMoveToTargetTask(
         occ=occ,  # numpy array (X,Y,Z)
