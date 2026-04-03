@@ -280,7 +280,7 @@ def demo_joint_motion() -> None:
     #     p.stepSimulation()
     #     time.sleep(sim_cfg["time_step"])
 
-    move_rob_to_cube_side(robot_id, plane_id, cube_id, "+X")
+    move_rob_to_cube_side(robot_id, plane_id, cube_id, "-X")
 
     # new_base = move_rob_dir(robot_id, -1, 30, plane_id)
 

@@ -300,7 +300,14 @@ class DynamicMoveToTargetTask:
                         self.prev_occ[x, y, z] = self.occ[x, y, z]
         return changed
     
-    def setup(self, start_pos: tuple[float,float,float], goal_pos: tuple[float,float,float], robot: Any):
+    def setup(
+        self,
+        start_pos: tuple[float,float,float],
+        goal_pos: tuple[float,float,float],
+        robot: Any,
+        start_node: Node | None = None,
+        goal_node: Node | None = None,
+    ):
         """
         Initialize planner with start and goal nodes on obstacle surfaces.
         
@@ -308,6 +315,8 @@ class DynamicMoveToTargetTask:
             start_pos: robot current position (x, y, z)
             goal_pos: target position (x, y, z)
             robot: rob_info instance (preferred) or raw PyBullet robot ID
+            start_node: optional explicit start node; if provided, skip position resolution
+            goal_node: optional explicit goal node; if provided, skip position resolution
         """
         self.target_pos = goal_pos
         self.reached = False
@@ -317,9 +326,11 @@ class DynamicMoveToTargetTask:
         self.cruise_z = p.getBasePositionAndOrientation(self.robot_id)[0][2]
         self.step_count = 0
         
-        # Find valid start and goal nodes (free cell centers adjacent to obstacles)
-        start_node = self._find_closest_node(start_pos)
-        goal_node = self._find_closest_node(goal_pos)
+        # Prefer explicitly provided nodes to keep initialization deterministic.
+        if start_node is None:
+            start_node = self._find_closest_node(start_pos)
+        if goal_node is None:
+            goal_node = self._find_closest_node(goal_pos)
         
         if start_node is None or goal_node is None:
             print(f"Warning: Could not find valid start/goal nodes. Start={start_node}, Goal={goal_node}")

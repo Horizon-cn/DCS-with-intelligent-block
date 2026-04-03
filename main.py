@@ -162,8 +162,10 @@ def main() -> None:
 
     task.setup(
         start_pos=start_base_pos,
-        goal_pos=[goal.pos[0]+0.5, goal.pos[1]+0.5, goal.pos[2]],
-        robot=robots_info[0]
+        goal_pos=goal.pos,
+        robot=robots_info[0],
+        start_node=start,
+        goal_node=goal,
     )
 
     task.begin()
