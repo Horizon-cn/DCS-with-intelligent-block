@@ -290,16 +290,31 @@ def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None
         return base_platform_idx
 
 
-def move_rob_to_cube_side_xplus(robot_id: int, plane_id: int, cube_id: int) -> int:
+def move_rob_to_cube_side(robot_id: int, plane_id: int, cube_id: int, direction_xy: str) -> int:
     """
     从 demo 初始状态出发:
     1. 先将 base_platform 固定在当前顶部位置；
-    2. 弯折机器人，让 end_platform 贴到当前立方体的 +x 侧面；
+    2. 按 XY 平面方向弯折机器人，让 end_platform 贴到对应侧面；
     3. 将 end_platform 固定到该侧面；
     4. 在 end_platform 固定后，将关节展开回初始角度。
 
+    Args:
+        direction_xy: 仅支持 "+X", "-X", "+Y", "-Y"。
+
     返回最终 end_platform 与 plane 的约束 id。
     """
+    direction_key = direction_xy.strip().upper()
+    yaw_by_dir = {
+        "+X": 0.0,
+        "-X": math.pi,
+        "+Y": math.pi / 2,
+        "-Y": -math.pi / 2,
+    }
+    if direction_key not in yaw_by_dir:
+        raise ValueError(f"Unsupported direction_xy={direction_xy!r}, expected one of +X/-X/+Y/-Y")
+
+    yaw_offset = yaw_by_dir[direction_key]
+
     base_platform_idx = -1
     end_platform_idx = 9
 
@@ -361,8 +376,9 @@ def move_rob_to_cube_side_xplus(robot_id: int, plane_id: int, cube_id: int) -> i
         childFrameOrientation=child_orn
     )
 
-    # cur = p.getJointState(robot_id, 0)[0]
-    # move_joint(robot_id, 0, cur, steps=120)
+    # Use joint-0 yaw to steer the same bending routine to one of 4 XY directions.
+    cur0 = p.getJointState(robot_id, 0)[0]
+    move_joint(robot_id, 0, cur0 + yaw_offset, steps=180)
 
     cur1 = p.getJointState(robot_id, 1)[0]
     move_joint(robot_id, 1, cur1 + math.radians(90), steps=180)
@@ -394,7 +410,7 @@ def move_rob_to_cube_side_xplus(robot_id: int, plane_id: int, cube_id: int) -> i
         jointAxis=[0, 0, 0],
         parentFramePosition=[0, 0, 0],
         childFramePosition=child_pos2,
-        parentFrameOrientation=[0, 1, 0, 0],
+        parentFrameOrientation=[0, 0, 0, 1],
         childFrameOrientation=child_orn2
     )
 
@@ -408,6 +424,9 @@ def move_rob_to_cube_side_xplus(robot_id: int, plane_id: int, cube_id: int) -> i
 
     cur1 = p.getJointState(robot_id, 1)[0]
     move_joint(robot_id, 1, cur1 - math.radians(90), steps=180)
+
+    cur0 = p.getJointState(robot_id, 0)[0]
+    move_joint(robot_id, 0, cur0 - yaw_offset, steps=180)
 
     # cur4 = p.getJointState(robot_id, 8)[0]
     # move_joint(robot_id, 8, cur4 - math.radians(90), steps=120)

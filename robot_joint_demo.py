@@ -17,7 +17,7 @@ from pathlib import Path
 from config_loader import load_config
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
 from control.motion import _set_collision_with_all
-from control.move import move_joint, move_rob_dir, move_rob_to_cube_side_xplus
+from control.move import move_joint, move_rob_dir, move_rob_to_cube_side
 from factory import *
 import numpy as np
 import random
@@ -280,7 +280,7 @@ def demo_joint_motion() -> None:
     #     p.stepSimulation()
     #     time.sleep(sim_cfg["time_step"])
 
-    move_rob_to_cube_side_xplus(robot_id, plane_id, cube_id)
+    move_rob_to_cube_side(robot_id, plane_id, cube_id, "+X")
 
     # new_base = move_rob_dir(robot_id, -1, 30, plane_id)
 
