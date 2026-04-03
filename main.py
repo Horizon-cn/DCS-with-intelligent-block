@@ -12,6 +12,28 @@ from control.dstar_surface_3d import *
 
 cube_picked: dict[int, bool] = {}
 
+
+def _spawn_pose_from_start_node(node: Node):
+    """Map start node (position + face_dir) to robot base spawn pose.
+
+    The robot starts on the start-node face midpoint, and its yaw is set to the
+    opposite direction of ``face_dir`` on the XY plane.
+    """
+    nx, ny, nz = NORM[node.face_dir]
+    # Use face midpoint so spawn position follows start-node surface location.
+    pos = [node.pos[0] - 0.5 * nx, node.pos[1] - 0.5 * ny, node.pos[2] - 0.5 * nz]
+
+    # face_dir points from free voxel center toward the contacted face normal.
+    # Spawn orientation should be opposite to that normal in the XY plane.
+    if nx != 0 or ny != 0:
+        yaw = math.atan2(-ny, -nx)
+    else:
+        # For +/-Z faces keep a stable default yaw.
+        yaw = 0.0
+
+    orn = p.getQuaternionFromEuler([0.0, 0.0, yaw])
+    return pos, orn
+
 def step_simulation(steps: int, time_step: float) -> None:
     for _ in range(steps):
         p.stepSimulation()
@@ -89,20 +111,21 @@ def main() -> None:
         [6.5,1,1],
         sim_cfg["use_maximal_coordinates"],
     )
-    robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
-    rob_num+=1
-
-    robot2_id = create_robot(
-        robv_shape_id,
-        robc_shape_id,
-        cfg["robot"],
-        [start.pos[0]+0.5, start.pos[1]+0.5, start.pos[2]],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
+    #robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
     rob_num+=1
 
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
+    start_base_pos, start_base_orn = _spawn_pose_from_start_node(start)
+    robot2_id = p.loadURDF(
+        new_robot_urdf,
+        basePosition=start_base_pos,
+        baseOrientation=start_base_orn,
+        useFixedBase=False,
+    )
+    
+    robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
+    rob_num+=1
+
     robot_id = p.loadURDF(
         new_robot_urdf,
         basePosition=[8, 8, 0],
@@ -116,11 +139,11 @@ def main() -> None:
     configure_visualizer(cfg["visualizer"], enable_rendering=True)
     step_simulation(600, sim_cfg["time_step"])
 
-    new_base = move_rob_dir(robot_id, -1, 30, plane_id)
+    # new_base = move_rob_dir(robot_id, -1, 30, plane_id)
 
-    for i in range(2):
-        new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
-    new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
+    # for i in range(2):
+    #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
+    # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
     planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
     planner.plan_from_current()  # Initialize planning
@@ -138,9 +161,9 @@ def main() -> None:
     task.replan_interval = 20  # Check map changes every 20 simulation steps
 
     task.setup(
-        start_pos=[start.pos[0]+0.5, start.pos[1]+0.5, start.pos[2]],
+        start_pos=start_base_pos,
         goal_pos=[goal.pos[0]+0.5, goal.pos[1]+0.5, goal.pos[2]],
-        robot_id=robot2_id
+        robot=robots_info[0]
     )
 
     task.begin()

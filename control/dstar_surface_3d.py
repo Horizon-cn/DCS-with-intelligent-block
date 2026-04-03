@@ -99,7 +99,13 @@ class DStarLiteSurface3D:
         self.rhs[self.goal] = 0
         self.g[self.goal] = INF
         self.OPEN.push(self.key(self.goal), self.goal)
-        print(f"Initialized D* Lite with start={self.start} and goal={self.goal}")
+        start_mid = self.node_to_face_midpoint(self.start)
+        goal_mid = self.node_to_face_midpoint(self.goal)
+        print(
+            "Initialized D* Lite with "
+            f"start(center={self.start.pos}, face={self.start.face_dir}, face_mid={start_mid}) "
+            f"and goal(center={self.goal.pos}, face={self.goal.face_dir}, face_mid={goal_mid})"
+        )
         
         # --- batch update mechanism ---
         self.update_buffer: Dict[Tuple[int,int,int], int] = {}  # voxel -> new_occ value
@@ -430,7 +436,7 @@ class DStarLiteSurface3D:
 
         print("\n--- PATH POINTS (face centers) ---")
         for i, n in enumerate(path):
-            print(f"{i:03d}: {n.pos}")
+            print(f"{i:03d}: {self.node_to_face_midpoint(n)}")
 
         print(f"\nTotal steps: {len(path)}, Hit goal: {self.start == self.goal}")
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pybullet as p
 import numpy as np
-from typing import Dict
+from typing import Dict, Any
 from python_motion_planning import *
 from config_loader import load_config
 from control.move import goto, move_base_dir, move_base_tar
@@ -28,6 +28,21 @@ def _set_collision_with_all(body_id: int, enabled: bool) -> None:
         other_id = p.getBodyUniqueId(i)
         if other_id != body_id:
             p.setCollisionFilterPair(body_id, other_id, -1, -1, flag)
+
+
+def _set_collision_with_all_links(body_id: int, enabled: bool) -> None:
+    """Enable/disable collisions between all links of body_id and all links of other bodies."""
+    flag = 1 if enabled else 0
+    body_links = [-1] + list(range(p.getNumJoints(body_id)))
+    n_bodies = p.getNumBodies()
+    for i in range(n_bodies):
+        other_id = p.getBodyUniqueId(i)
+        if other_id == body_id:
+            continue
+        other_links = [-1] + list(range(p.getNumJoints(other_id)))
+        for la in body_links:
+            for lb in other_links:
+                p.setCollisionFilterPair(body_id, other_id, la, lb, flag)
 
 
 
@@ -285,25 +300,26 @@ class DynamicMoveToTargetTask:
                         self.prev_occ[x, y, z] = self.occ[x, y, z]
         return changed
     
-    def setup(self, start_pos: tuple[float,float,float], goal_pos: tuple[float,float,float], robot_id: int):
+    def setup(self, start_pos: tuple[float,float,float], goal_pos: tuple[float,float,float], robot: Any):
         """
         Initialize planner with start and goal nodes on obstacle surfaces.
         
         Args:
             start_pos: robot current position (x, y, z)
             goal_pos: target position (x, y, z)
-            robot_id: PyBullet robot ID
+            robot: rob_info instance (preferred) or raw PyBullet robot ID
         """
         self.target_pos = goal_pos
         self.reached = False
         self.current_i = 0
-        self.cruise_z = p.getBasePositionAndOrientation(robot_id)[0][2]
+        self.rob = robot
+        self.robot_id = robot.robot_id if hasattr(robot, "robot_id") else int(robot)
+        self.cruise_z = p.getBasePositionAndOrientation(self.robot_id)[0][2]
         self.step_count = 0
-        self.robot_id = robot_id
         
         # Find valid start and goal nodes (free cell centers adjacent to obstacles)
-        start_node = self._find_closest_node(start_pos, robot_id)
-        goal_node = self._find_closest_node(goal_pos, robot_id)
+        start_node = self._find_closest_node(start_pos)
+        goal_node = self._find_closest_node(goal_pos)
         
         if start_node is None or goal_node is None:
             print(f"Warning: Could not find valid start/goal nodes. Start={start_node}, Goal={goal_node}")
@@ -322,42 +338,100 @@ class DynamicMoveToTargetTask:
             print(f"Error initializing D* Lite planner: {e}")
             self.reached = True
     
-    def _find_closest_node(self, pos: tuple[float,float,float], robot_id: int) -> Node | None:
+    def _find_closest_node(self, pos: tuple[float,float,float]) -> Node | None:
         """
-        Find closest free voxel to position that has an exposed obstacle face.
+        Find a stable best-matching exposed-face node for a world position.
+
+        The input position may be either a voxel center or a face midpoint
+        (robot base spawn point). We score all nearby valid nodes and return
+        the best one, instead of returning the first face hit by loop order.
         """
         x, y, z = pos
-        grid_x = int(round(x))
-        grid_y = int(round(y))
-        grid_z = int(round(z))
-        
-        # Search radius for finding valid node
-        search_radius = 1
-        
-        for dx in range(-search_radius, search_radius + 1):
-            for dy in range(-search_radius, search_radius + 1):
-                for dz in range(-search_radius, search_radius + 1):
-                    vx, vy, vz = grid_x + dx, grid_y + dy, grid_z + dz
-                    
-                    # Check if voxel is in bounds and free
-                    if not (0 <= vx < self.size_xyz[0] and 0 <= vy < self.size_xyz[1] and 0 <= vz < self.size_xyz[2]):
-                        continue
+        # Use center-based integer anchor for neighborhood expansion.
+        grid_x = int(round(x - 0.5))
+        grid_y = int(round(y - 0.5))
+        grid_z = int(round(z - 0.5))
+
+        def in_bounds(vx: int, vy: int, vz: int) -> bool:
+            return (
+                0 <= vx < self.size_xyz[0]
+                and 0 <= vy < self.size_xyz[1]
+                and 0 <= vz < self.size_xyz[2]
+            )
+
+        def candidate_score(vx: int, vy: int, vz: int, face: str):
+            cx, cy, cz = vx + 0.5, vy + 0.5, vz + 0.5
+            nx, ny, nz = NORM[face]
+            mx, my, mz = cx + 0.5 * nx, cy + 0.5 * ny, cz + 0.5 * nz
+
+            # Distance to node center and face midpoint (squared distances).
+            dc2 = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz)
+            dm2 = (x - mx) * (x - mx) + (y - my) * (y - my) + (z - mz) * (z - mz)
+
+            # Prefer whichever representation (center/midpoint) better explains the input.
+            # Then break ties deterministically by midpoint, center, grid proximity, and face order.
+            return (
+                min(dc2, dm2),
+                dm2,
+                dc2,
+                abs(vx - grid_x) + abs(vy - grid_y) + abs(vz - grid_z),
+                FACES.index(face),
+            )
+
+        best_node: Node | None = None
+        best_score = None
+
+        # Expanding-radius search keeps it local and deterministic.
+        for search_radius in range(0, 3):
+            found_in_radius = False
+            for dx in range(-search_radius, search_radius + 1):
+                for dy in range(-search_radius, search_radius + 1):
+                    for dz in range(-search_radius, search_radius + 1):
+                        vx, vy, vz = grid_x + dx, grid_y + dy, grid_z + dz
+                        if not in_bounds(vx, vy, vz):
+                            continue
+                        if self.occ[vx, vy, vz] != 0:
+                            continue
+
+                        for face in FACES:
+                            ox = vx + NORM[face][0]
+                            oy = vy + NORM[face][1]
+                            oz = vz + NORM[face][2]
+                            if not in_bounds(ox, oy, oz):
+                                continue
+                            if self.occ[ox, oy, oz] == 0:
+                                continue
+
+                            found_in_radius = True
+                            score = candidate_score(vx, vy, vz, face)
+                            if best_score is None or score < best_score:
+                                best_score = score
+                                best_node = Node((vx + 0.5, vy + 0.5, vz + 0.5), face)
+
+            if found_in_radius and best_node is not None:
+                return best_node
+
+        # Fallback: full-grid scan for robustness on sparse/edge cases.
+        for vx in range(self.size_xyz[0]):
+            for vy in range(self.size_xyz[1]):
+                for vz in range(self.size_xyz[2]):
                     if self.occ[vx, vy, vz] != 0:
                         continue
-                    
-                    # Find exposed faces (adjacent to obstacles)
                     for face in FACES:
                         ox = vx + NORM[face][0]
                         oy = vy + NORM[face][1]
                         oz = vz + NORM[face][2]
-                        
-                        if 0 <= ox < self.size_xyz[0] and 0 <= oy < self.size_xyz[1] and 0 <= oz < self.size_xyz[2]:
-                            if self.occ[ox, oy, oz] != 0:
-                                # Found valid node
-                                center = (vx + 0.5, vy + 0.5, vz + 0.5)
-                                return Node(center, face)
-        
-        return None
+                        if not in_bounds(ox, oy, oz):
+                            continue
+                        if self.occ[ox, oy, oz] == 0:
+                            continue
+
+                        score = candidate_score(vx, vy, vz, face)
+                        if best_score is None or score < best_score:
+                            best_score = score
+                            best_node = Node((vx + 0.5, vy + 0.5, vz + 0.5), face)
+
+        return best_node
     
     def begin(self) -> None:
         """
@@ -378,7 +452,8 @@ class DynamicMoveToTargetTask:
                 return
 
         self.reached = False
-        _set_collision_with_all(self.robot_id, enabled=False)
+        # Disable collisions for the whole articulated robot during D* execution.
+        _set_collision_with_all_links(self.robot_id, enabled=False)
 
         try:
             while not self.reached:
@@ -398,7 +473,7 @@ class DynamicMoveToTargetTask:
                         )
 
                         # Keep D* start aligned with current robot position before replanning.
-                        cur_node = self._find_closest_node(current_pos, self.robot_id)
+                        cur_node = self._find_closest_node(current_pos)
                         if cur_node is None:
                             print("No valid current node for replanning")
                             self.reached = True
@@ -422,9 +497,20 @@ class DynamicMoveToTargetTask:
                             self.reached = True
                         continue
 
+                # rob_info-aware stepping on D* node graph: move from path[i] to path[i+1].
+                if hasattr(self.rob, "step_forward"):
+                    if self.current_i >= len(self.path) - 1:
+                        self.reached = True
+                        break
+
+                    from_node = self.path[self.current_i]
+                    to_node = self.path[self.current_i + 1]
+                    self.rob.step_forward(from_node, to_node)
+                    self.current_i += 1
+                    continue
+
                 waypoint = self.path[self.current_i].pos
-                facedir = self.path[self.current_i].face_dir
-                target_3d = [waypoint[0]+0.5, waypoint[1]+0.5, waypoint[2]]
+                target_3d = [waypoint[0] + 0.5, waypoint[1] + 0.5, waypoint[2]]
 
                 # Advance index only when current path point is reached.
                 if all(abs(current_pos[i] - target_3d[i]) < 0.05 for i in range(3)):
@@ -448,7 +534,8 @@ class DynamicMoveToTargetTask:
                 )
                 self.current_i += 1
         finally:
-            _set_collision_with_all(self.robot_id, enabled=True)
+            # Intentionally keep collisions disabled in this task.
+            pass
 
         return
     
