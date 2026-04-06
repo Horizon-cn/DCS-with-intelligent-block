@@ -235,23 +235,48 @@ class rob_info:
             qz = 0.25 * s
         return (qx, qy, qz, qw)
 
+    def _platform_contact_sign(self, platform_name: str) -> float:
+        # base_platform contacts with local -Z; end_platform contacts with local +Z.
+        return -1.0 if platform_name == "base_platform" else 1.0
+
+    def _platform_orientation_for_face(self, face_dir: str, platform_name: str):
+        """World-frame quaternion with the platform contact side pointing at face_dir."""
+        n = self.FACE_NORM[face_dir]
+
+        # Deterministic tangent axes for each exposed face. The platform's local
+        # contact side points toward n; base and end use opposite local Z sides.
+        if face_dir in ("+Z", "-Z"):
+            x_axis = (1.0, 0.0, 0.0)
+        elif face_dir in ("+X", "-X"):
+            x_axis = (0.0, 1.0, 0.0)
+        else:
+            x_axis = (1.0, 0.0, 0.0)
+
+        contact_sign = self._platform_contact_sign(platform_name)
+        z_axis = (n[0] / contact_sign, n[1] / contact_sign, n[2] / contact_sign)
+        y_axis = self._normalize(self._cross(z_axis, x_axis))
+        x_axis = self._normalize(self._cross(y_axis, z_axis))
+        return self._quat_from_axes(x_axis, y_axis, z_axis)
+
     def _node_face_midpoint(self, node):
         n = self.FACE_NORM[node.face_dir]
         return (node.pos[0] + 0.5 * n[0], node.pos[1] + 0.5 * n[1], node.pos[2] + 0.5 * n[2])
 
-    def _platform_center_for_node_contact(self, node, platform_orn):
-        """Return platform center so local -Z face contacts the node surface midpoint.
+    def _platform_center_for_node_contact(self, node, platform_orn, platform_name: str):
+        """Return the platform link center for a surface-contact pose.
 
-        This mirrors `_spawn_pose_from_start_node` orientation semantics where local
-        `-Z` is aligned with the surface normal (`face_dir`).
+        The node defines the target surface midpoint. The platform is placed so its
+        contact face coincides with that surface. The base platform uses local `-Z`
+        as its contact side; the end platform uses local `+Z`.
         """
         face_mid = self._node_face_midpoint(node)
         rot = p.getMatrixFromQuaternion(platform_orn)
         z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
+        center_offset = -self._platform_contact_sign(platform_name) * self.PLATFORM_HALF_THICKNESS
         return (
-            face_mid[0] + z_axis[0] * self.PLATFORM_HALF_THICKNESS,
-            face_mid[1] + z_axis[1] * self.PLATFORM_HALF_THICKNESS,
-            face_mid[2] + z_axis[2] * self.PLATFORM_HALF_THICKNESS,
+            face_mid[0] + z_axis[0] * center_offset,
+            face_mid[1] + z_axis[1] * center_offset,
+            face_mid[2] + z_axis[2] * center_offset,
         )
 
     def _create_anchor(self, pos, orn) -> int:
@@ -324,62 +349,7 @@ class rob_info:
             time.sleep(dt)
 
     def _compute_target_orientation(self, from_node, to_node, fixed_platform_pos, moving_platform_name: str):
-        n_from = self.FACE_NORM[from_node.face_dir]
-        n_to = self.FACE_NORM[to_node.face_dir]
-        from_mid = self._node_face_midpoint(from_node)
-        to_mid = self._node_face_midpoint(to_node)
-
-        # moving platform local +X in world; this defines "front".
-        moving_q = self.base_platform_orientation if moving_platform_name == "base_platform" else self.end_platform_orientation
-        rot = p.getMatrixFromQuaternion(moving_q)
-        moving_front = (rot[0], rot[3], rot[6])
-        moving_right = (rot[1], rot[4], rot[7])
-
-        disp = (to_mid[0] - from_mid[0], to_mid[1] - from_mid[1], to_mid[2] - from_mid[2])
-        disp_proj = self._project_to_plane(disp, n_from)
-        front_proj = self._normalize(self._project_to_plane(moving_front, n_from))
-        right_proj = self._normalize(self._project_to_plane(moving_right, n_from))
-        fp = self._dot(disp_proj, front_proj)
-        rp = self._dot(disp_proj, right_proj)
-
-        to_fixed = (
-            fixed_platform_pos[0] - to_mid[0],
-            fixed_platform_pos[1] - to_mid[1],
-            fixed_platform_pos[2] - to_mid[2],
-        )
-        toward_fixed_proj = self._normalize(self._project_to_plane(to_fixed, n_to))
-
-        parallel = abs(abs(self._dot(n_from, n_to)) - 1.0) < 1e-6
-        if parallel:
-            # front/back/left/right -> point toward fixed platform.
-            if abs(fp) < 1e-6 or abs(rp) < 1e-6:
-                x_axis = toward_fixed_proj
-            else:
-                # right-front/right-back -> point left; left-front/left-back -> point right.
-                right_on_to = self._normalize(self._project_to_plane(right_proj, n_to))
-                if rp > 0:
-                    x_axis = (-right_on_to[0], -right_on_to[1], -right_on_to[2])
-                else:
-                    x_axis = right_on_to
-        else:
-            # Perpendicular faces: orient by perpendicular direction, biased to face fixed platform.
-            x_axis = self._cross(n_to, n_from)
-            if self._dot(x_axis, to_fixed) < 0:
-                x_axis = (-x_axis[0], -x_axis[1], -x_axis[2])
-            x_axis = self._normalize(x_axis)
-            if self._norm(x_axis) < 1e-8:
-                x_axis = toward_fixed_proj
-
-        if self._norm(x_axis) < 1e-8:
-            fallback = (1.0, 0.0, 0.0)
-            x_axis = self._normalize(self._project_to_plane(fallback, n_to))
-
-        # Platform normal opposes surface normal to realize face contact.
-        z_axis = (-n_to[0], -n_to[1], -n_to[2])
-        y_axis = self._normalize(self._cross(z_axis, x_axis))
-        x_axis = self._normalize(self._cross(y_axis, z_axis))
-
-        return self._quat_from_axes(x_axis, y_axis, z_axis)
+        return self._platform_orientation_for_face(to_node.face_dir, moving_platform_name)
 
     def glue_to_cube(self, cube_id: int) -> None:
         self.glue_cid = try_glue(self.robot_id, cube_id)
@@ -426,9 +396,9 @@ class rob_info:
         fixed_link = self._platform_link(fixed_name)
         moving_link = self._platform_link(moving_name)
 
-        from_pos = self._node_face_midpoint(from_node)
-
         fixed_pos, fixed_orn = self._link_pose(fixed_link)
+        fixed_contact_pos = self._platform_center_for_node_contact(from_node, fixed_orn, fixed_name)
+
         # lock fixed platform to current node plane at start-state.
         if self.fixed_cid is not None:
             p.removeConstraint(self.fixed_cid)
@@ -436,12 +406,12 @@ class rob_info:
         if self.fixed_anchor_id is not None:
             p.removeBody(self.fixed_anchor_id)
             self.fixed_anchor_id = None
-
-        self.fixed_anchor_id = self._create_anchor(from_pos, fixed_orn)
+        self.fixed_anchor_id = self._create_anchor(fixed_contact_pos, fixed_orn)
         self.fixed_cid = self._create_lock_to_anchor(fixed_link, self.fixed_anchor_id)
 
-        target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_pos, moving_name)
-        target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn)
+        target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_contact_pos, moving_name)
+        target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn, moving_name)
+        print(f"Moving {moving_name} from {fixed_name} contact at {fixed_contact_pos} to target node at {to_node.pos} with orientation {target_moving_orn}")
         self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=180)
 
         # end-state: moving platform also locked on target node plane.
@@ -451,7 +421,6 @@ class rob_info:
         if self.moving_anchor_id is not None:
             p.removeBody(self.moving_anchor_id)
             self.moving_anchor_id = None
-
         self.moving_anchor_id = self._create_anchor(target_moving_pos, target_moving_orn)
         self.moving_cid = self._create_lock_to_anchor(moving_link, self.moving_anchor_id)
 

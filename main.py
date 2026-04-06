@@ -138,7 +138,7 @@ def main() -> None:
         basePosition=[1,8,1],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,
-        #globalScaling=1.2,
+        globalScaling=1,
     )
     #_set_collision_with_all_links(robot2_id, enabled=False)
     
