@@ -165,6 +165,8 @@ class rob_info:
 
     BASE_PLATFORM_LINK = -1
     END_PLATFORM_LINK = 9
+    # new_robot.urdf platform box size is 0.4 x 0.4 x 0.1 (local Z thickness=0.1).
+    PLATFORM_HALF_THICKNESS = 0.05
     FACE_NORM = {
         "+X": (1.0, 0.0, 0.0), "-X": (-1.0, 0.0, 0.0),
         "+Y": (0.0, 1.0, 0.0), "-Y": (0.0, -1.0, 0.0),
@@ -249,6 +251,21 @@ class rob_info:
     def _node_face_midpoint(self, node):
         n = self.FACE_NORM[node.face_dir]
         return (node.pos[0] + 0.5 * n[0], node.pos[1] + 0.5 * n[1], node.pos[2] + 0.5 * n[2])
+
+    def _platform_center_for_node_contact(self, node, platform_orn):
+        """Return platform center so local -Z face contacts the node surface midpoint.
+
+        This mirrors `_spawn_pose_from_start_node` orientation semantics where local
+        `-Z` is aligned with the surface normal (`face_dir`).
+        """
+        face_mid = self._node_face_midpoint(node)
+        rot = p.getMatrixFromQuaternion(platform_orn)
+        z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
+        return (
+            face_mid[0] + z_axis[0] * self.PLATFORM_HALF_THICKNESS,
+            face_mid[1] + z_axis[1] * self.PLATFORM_HALF_THICKNESS,
+            face_mid[2] + z_axis[2] * self.PLATFORM_HALF_THICKNESS,
+        )
 
     def _create_anchor(self, pos, orn) -> int:
         col = p.createCollisionShape(p.GEOM_SPHERE, radius=1e-3)
@@ -429,7 +446,6 @@ class rob_info:
         moving_link = self._platform_link(moving_name)
 
         from_pos = self._node_face_midpoint(from_node)
-        to_pos = self._node_face_midpoint(to_node)
 
         fixed_pos, fixed_orn = self._link_pose(fixed_link)
         # lock fixed platform to current node plane at start-state.
@@ -444,7 +460,8 @@ class rob_info:
         self.fixed_cid = self._create_lock_to_anchor(fixed_link, self.fixed_anchor_id)
 
         target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_pos, moving_name)
-        self._smooth_apply_ik(moving_link, to_pos, target_moving_orn, steps=180)
+        target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=180)
 
         # end-state: moving platform also locked on target node plane.
         if self.moving_cid is not None:
@@ -454,7 +471,7 @@ class rob_info:
             p.removeBody(self.moving_anchor_id)
             self.moving_anchor_id = None
 
-        self.moving_anchor_id = self._create_anchor(to_pos, target_moving_orn)
+        self.moving_anchor_id = self._create_anchor(target_moving_pos, target_moving_orn)
         self.moving_cid = self._create_lock_to_anchor(moving_link, self.moving_anchor_id)
 
         # Cache orientations for next-step orientation logic.
