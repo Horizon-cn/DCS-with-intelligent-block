@@ -11,16 +11,16 @@ Robot Joint Motion Demo
 """
 
 import time
-import math
-import pybullet as p
 from pathlib import Path
+import random
+
+import numpy as np
+import pybullet as p
+
 from config_loader import load_config
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
-from control.motion import _set_collision_with_all
-from control.move import move_joint, move_rob_dir, move_rob_to_cube_side
-from factory import *
-import numpy as np
-import random
+from control.move import move_rob_to_cube_side
+from factory import create_cube, create_cube_shapes, create_cube_stack
 
 
 def print_joint_info(robot_id: int) -> None:

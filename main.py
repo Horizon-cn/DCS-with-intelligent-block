@@ -1,14 +1,24 @@
-import time
-import pybullet as p
-import python_motion_planning as pmp
 import math
+import random
+import time
 from pathlib import Path
 
-from factory import *
+import numpy as np
+import pybullet as p
+
 from config_loader import load_config
-from control.motion import _set_collision_with_all_links
+from control.dstar_surface_3d import DStarLiteSurface3D, FACES, NORM, Node
+from control.motion import DynamicMoveToTargetTask
+from factory import (
+    create_cube_org,
+    create_cube_shapes,
+    create_cube_shapes_org,
+    create_cube_stack,
+    create_robot,
+    create_robot_shapes,
+    rob_info,
+)
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
-from control.dstar_surface_3d import *
 
 cube_picked: dict[int, bool] = {}
 

@@ -360,6 +360,43 @@ class DStarLiteSurface3D:
         out = [c for c in cand if node in self.successors(c)]
         return list(dict.fromkeys(out))
 
+    def _best_successor(self, node: Node) -> Optional[Node]:
+        best = INF
+        best_s = None
+        for successor in self.successors(node):
+            if successor.pos == node.pos:
+                continue
+            value = self.cost(node, successor) + self.g.get(successor, INF)
+            if value < best:
+                best = value
+                best_s = successor
+        return best_s
+
+    def _affected_free_voxels(self, voxels) -> Set[Tuple[int, int, int]]:
+        affected = set()
+        for voxel in voxels:
+            affected.add(voxel)
+            for dv in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+                neighbor = self.addv(voxel, dv)
+                if self.in_bounds(neighbor):
+                    affected.add(neighbor)
+        return affected
+
+    def _update_affected_nodes(self, voxels) -> None:
+        affected_nodes: Set[Node] = set()
+        for voxel in self._affected_free_voxels(voxels):
+            if self.occ_at(voxel) != 0:
+                continue
+            affected_nodes.update(self._candidate_face_nodes(voxel))
+
+        for node in affected_nodes:
+            if self.valid_node(node):
+                self.update_vertex(node)
+            else:
+                self.rhs[node] = INF
+                self.g[node] = INF
+                self.update_vertex(node)
+
     # --- usage helpers ---
     def plan_from_current(self) -> bool:
         """Run/repair plan for current start; returns True if reachable."""
@@ -383,22 +420,11 @@ class DStarLiteSurface3D:
         for _ in range(max_steps):
             if current == self.goal:
                 break
-            
-            # Greedy step: find successor with minimum cost
-            best = INF
-            best_s = None
-            for s in self.successors(current):
-                if s.pos == current.pos:
-                    continue
-                c = self.cost(current, s)
-                val = c + self.g.get(s, INF)
-                if val < best:
-                    best = val
-                    best_s = s
-            
+
+            best_s = self._best_successor(current)
             if best_s is None:
                 break
-            
+
             current = best_s
             path.append(current)
         
@@ -489,17 +515,7 @@ class DStarLiteSurface3D:
 
     def next_step(self) -> Optional[Node]:
         """Greedy one-step on surface graph using g-values (like extracting policy)."""
-        best = INF
-        best_s = None
-        for s in self.successors(self.start):
-            if s.pos == self.start.pos:
-                continue
-            c = self.cost(self.start, s)
-            val = c + self.g.get(s, INF)
-            if val < best:
-                best = val
-                best_s = s
-        return best_s
+        return self._best_successor(self.start)
 
     def move_start_to(self, new_start: Node):
         """Advance the robot along the surface."""
@@ -531,31 +547,7 @@ class DStarLiteSurface3D:
         x, y, z = v
         self.occ[x, y, z] = new_occ
 
-        # affected voxels: v and its 6-neighbors (because exposure depends on 6-neighborhood)
-        affected_voxels = [v]
-        for dv in [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]:
-            vv = self.addv(v, dv)
-            if self.in_bounds(vv):
-                affected_voxels.append(vv)
-
-        # update all nearby free-cell points whose available surfaces may change
-        affected_nodes: Set[Node] = set()
-        for vv in affected_voxels:
-            if not self.in_bounds(vv):
-                continue
-            if self.occ_at(vv) != 0:
-                continue
-            for n in self._candidate_face_nodes(vv):
-                affected_nodes.add(n)
-
-        for n in affected_nodes:
-            if self.valid_node(n):
-                self.update_vertex(n)
-            else:
-                # If it becomes invalid, set rhs=INF and g=INF to remove its influence
-                self.rhs[n] = INF
-                self.g[n] = INF
-                self.update_vertex(n)
+        self._update_affected_nodes((v,))
 
         self.compute_shortest_path()
     
@@ -601,35 +593,8 @@ class DStarLiteSurface3D:
             x, y, z = v
             self.occ[x, y, z] = new_occ
         
-        # Second pass: identify all affected surface nodes
-        affected_voxels = set()
-        for v in self.update_buffer.keys():
-            affected_voxels.add(v)
-            # Add 6-neighbors since exposure depends on neighborhood
-            for dv in [(1,0,0),(-1,0,0),(0,1,0),(0,-1,0),(0,0,1),(0,0,-1)]:
-                vv = self.addv(v, dv)
-                if self.in_bounds(vv):
-                    affected_voxels.add(vv)
-        
-        # Third pass: update all affected planning nodes
-        affected_nodes: Set[Node] = set()
-        for vv in affected_voxels:
-            if not self.in_bounds(vv):
-                continue
-            if self.occ_at(vv) != 0:
-                continue
-
-            for n in self._candidate_face_nodes(vv):
-                affected_nodes.add(n)
-        
-        # Fourth pass: update vertices (accumulate affected nodes, don't replan yet)
-        for n in affected_nodes:
-            if self.valid_node(n):
-                self.update_vertex(n)
-            else:
-                self.rhs[n] = INF
-                self.g[n] = INF
-                self.update_vertex(n)
+        # Second pass: update all affected planning nodes.
+        self._update_affected_nodes(self.update_buffer.keys())
         
         # Fifth pass: single replanning after all updates
         if replan:

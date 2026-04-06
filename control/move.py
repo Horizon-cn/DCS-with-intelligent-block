@@ -1,35 +1,37 @@
 from __future__ import annotations
 import math
 import time
+
 import pybullet as p
+
 from config_loader import load_config
 
 cfg = load_config()
+PI = math.pi
 
 
 def _normalize_angle(angle: float) -> float:
-    return (angle + 3.141592653589793) % (2 * 3.141592653589793) - 3.141592653589793
+    return (angle + PI) % (2 * PI) - PI
 
 def smoothstep(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
-def step(sim, obj, axis_index, delta):
-    """
-    沿指定轴移动对象
-    
-    Args:
-        sim: CoppeliaSim API 对象
-        obj: 对象句柄
-        axis_index: 轴索引 (0=x, 1=y, 2=z)
-        delta: 移动增量
-        
-    Returns:
-        list: 更新后的位置 [x, y, z]
-    """
-    p = sim.getObjectPosition(obj, -1)
-    p[axis_index] += delta
-    sim.setObjectPosition(obj, -1, p)
-    return p
+
+def _animate_base_pose(
+    body_id: int,
+    steps: int,
+    time_step: float,
+    pose_at,
+    *,
+    zero_velocity: bool = False,
+) -> None:
+    for i in range(max(1, steps)):
+        pos, orn = pose_at(smoothstep((i + 1) / max(1, steps)))
+        p.resetBasePositionAndOrientation(body_id, pos, orn)
+        if zero_velocity:
+            p.resetBaseVelocity(body_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+        p.stepSimulation()
+        time.sleep(time_step)
 
 def goto(robot_id: int, target_pos: list[float], speed: float = 0.005, tolerance: float = 0.01):
     """
@@ -148,32 +150,29 @@ def move_base_dir(obj: int, robot_orn, offset: float, move_steps: int, time_step
         start_pos[1] + offset * forward[1],
         start_pos[2] + offset * forward[2],
     ]
-
-    for i in range(move_steps):
-        t = (i + 1) / move_steps
-        s = smoothstep(t)
-        pos = [
+    _animate_base_pose(
+        obj,
+        move_steps,
+        time_step,
+        lambda s: ([
             start_pos[0] + (target_pos[0] - start_pos[0]) * s,
             start_pos[1] + (target_pos[1] - start_pos[1]) * s,
             start_pos[2] + (target_pos[2] - start_pos[2]) * s,
-        ]
-        p.resetBasePositionAndOrientation(obj, pos, start_orn)
-        p.stepSimulation()
-        time.sleep(time_step)
+        ], start_orn),
+    )
 
 def move_base_tar(obj_id: int, target_pos: list[float], orn, steps: int, time_step: float) -> None:
     start_pos, _ = p.getBasePositionAndOrientation(obj_id)
-    for i in range(steps):
-        t = (i + 1) / steps
-        s = smoothstep(t)
-        pos = [
+    _animate_base_pose(
+        obj_id,
+        steps,
+        time_step,
+        lambda s: ([
             start_pos[0] + (target_pos[0] - start_pos[0]) * s,
             start_pos[1] + (target_pos[1] - start_pos[1]) * s,
             start_pos[2] + (target_pos[2] - start_pos[2]) * s,
-        ]
-        p.resetBasePositionAndOrientation(obj_id, pos, orn)
-        p.stepSimulation()
-        time.sleep(time_step)
+        ], orn),
+    )
 
 
 def move_rob_dir(robot_id: int, base_id: int, ang: float, plane_id: int) -> None:
@@ -440,27 +439,6 @@ def move_rob_to_cube_side(robot_id: int, plane_id: int, cube_id: int, direction_
 
     return cid_end_cube
 
-
-
-def rotate_base(base_id: int, angle: float) -> None:
-    sim_cfg = cfg["simulation"]
-    motion_cfg = cfg["motion"]
-    rotate_steps = motion_cfg["move_steps"]
-    rotate_time_step = sim_cfg["time_step"]
-
-    start_pos, start_orn = p.getBasePositionAndOrientation(base_id)
-    p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-
-    for i in range(rotate_steps):
-        t = (i + 1) / rotate_steps
-        s = smoothstep(t)
-        delta_orn = p.getQuaternionFromEuler([0, 0, -angle * s])
-        _, orn = p.multiplyTransforms([0, 0, 0], start_orn, [0, 0, 0], delta_orn)
-        p.resetBasePositionAndOrientation(base_id, start_pos, orn)
-        p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-        p.stepSimulation()
-        time.sleep(rotate_time_step)
-
 def rotate_to(base_id: int, target_angle: float) -> None:
     sim_cfg = cfg["simulation"]
     motion_cfg = cfg["motion"]
@@ -468,15 +446,13 @@ def rotate_to(base_id: int, target_angle: float) -> None:
     rotate_time_step = sim_cfg["time_step"]
 
     start_pos, start_orn = p.getBasePositionAndOrientation(base_id)
-    roll, pitch, start_yaw = p.getEulerFromQuaternion(start_orn)
+    _, _, start_yaw = p.getEulerFromQuaternion(start_orn)
     delta_angle = _normalize_angle(target_angle - start_yaw)
 
-    for i in range(rotate_steps):
-        t = (i + 1) / rotate_steps
-        s = smoothstep(t)
-        current_angle = start_yaw + delta_angle * s
-        current_orn = p.getQuaternionFromEuler([0, 0, current_angle])
-        p.resetBasePositionAndOrientation(base_id, start_pos, current_orn)
-        p.resetBaseVelocity(base_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-        p.stepSimulation()
-        time.sleep(rotate_time_step)
+    _animate_base_pose(
+        base_id,
+        rotate_steps,
+        rotate_time_step,
+        lambda s: (start_pos, p.getQuaternionFromEuler([0, 0, start_yaw + delta_angle * s])),
+        zero_velocity=True,
+    )

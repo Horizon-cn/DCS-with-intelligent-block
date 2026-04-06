@@ -1,32 +1,57 @@
 from __future__ import annotations
-from typing import List, Tuple
-import pybullet as p
 from dataclasses import dataclass
 import math
 import time
-from control.motion import *
-from control.move import *
+from typing import List, Tuple
 
+import pybullet as p
+
+from config_loader import load_config
+from control.motion import MoveToTargetTask, drop_cube, pickup_cube, try_glue, unglue
+from control.move import rotate_to
+
+cfg = load_config()
+
+def _create_mesh_shape_pair(mesh_cfg: dict, scale_key: str) -> tuple[int, int]:
+    shared_kwargs = {
+        "shapeType": p.GEOM_MESH,
+        "fileName": mesh_cfg["mesh_file"],
+        "meshScale": mesh_cfg[scale_key],
+    }
+    visual_shape_id = p.createVisualShape(
+        rgbaColor=mesh_cfg["visual_rgba"],
+        specularColor=mesh_cfg["visual_specular"],
+        visualFramePosition=mesh_cfg["frame_shift"],
+        **shared_kwargs,
+    )
+    collision_shape_id = p.createCollisionShape(
+        collisionFramePosition=mesh_cfg["frame_shift"],
+        **shared_kwargs,
+    )
+    return visual_shape_id, collision_shape_id
+
+def _create_body(
+    visual_shape_id: int,
+    collision_shape_id: int,
+    body_cfg: dict,
+    base_position: List[float],
+    use_maximal_coordinates: bool,
+    base_orientation: tuple[float, float, float, float] | None = None,
+) -> int:
+    body_id = p.createMultiBody(
+        baseMass=body_cfg["mass"],
+        baseCollisionShapeIndex=collision_shape_id,
+        baseVisualShapeIndex=visual_shape_id,
+        basePosition=base_position,
+        useMaximalCoordinates=use_maximal_coordinates,
+        **({"baseOrientation": base_orientation} if base_orientation is not None else {}),
+    )
+    p.changeDynamics(body_id, -1, lateralFriction=body_cfg["lateral_friction"])
+    return body_id
 
 
 def create_cube_shapes_org(cube_cfg: dict) -> tuple[int, int]:
-    visual_shape_id = p.createVisualShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        rgbaColor=cube_cfg["visual_rgba"],
-        specularColor=cube_cfg["visual_specular"],
-        visualFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    collision_shape_id = p.createCollisionShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        collisionFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    return visual_shape_id, collision_shape_id
+    return _create_mesh_shape_pair(cube_cfg, "cube_scale")
 
 def create_cube_org(
     visual_shape_id: int,
@@ -35,34 +60,16 @@ def create_cube_org(
     base_position: List[float],
     use_maximal_coordinates: bool,
 ) -> int:
-    cube_id = p.createMultiBody(
-        baseMass=cube_cfg["mass"],
-        baseCollisionShapeIndex=collision_shape_id,
-        baseVisualShapeIndex=visual_shape_id,
-        basePosition=base_position,
-        useMaximalCoordinates=use_maximal_coordinates,
+    return _create_body(
+        visual_shape_id,
+        collision_shape_id,
+        cube_cfg,
+        base_position,
+        use_maximal_coordinates,
     )
-    p.changeDynamics(cube_id, -1, lateralFriction=cube_cfg["lateral_friction"])
-    return cube_id
 
 def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
-    visual_shape_id = p.createVisualShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        rgbaColor=cube_cfg["visual_rgba"],
-        specularColor=cube_cfg["visual_specular"],
-        visualFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    collision_shape_id = p.createCollisionShape(
-        shapeType=p.GEOM_MESH,
-        fileName=cube_cfg["mesh_file"],
-        collisionFramePosition=cube_cfg["frame_shift"],
-        meshScale=cube_cfg["cube_scale"],
-    )
-
-    return visual_shape_id, collision_shape_id
+    return _create_mesh_shape_pair(cube_cfg, "cube_scale")
 
 def create_cube(
     visual_shape_id: int,
@@ -71,16 +78,14 @@ def create_cube(
     base_position: List[float],
     use_maximal_coordinates: bool,
 ) -> int:
-    cube_id = p.createMultiBody(
-        baseMass=cube_cfg["mass"],
-        baseCollisionShapeIndex=collision_shape_id,
-        baseVisualShapeIndex=visual_shape_id,
-        basePosition=base_position,
-        baseOrientation=p.getQuaternionFromEuler([0, 0, math.pi / 2]),
-        useMaximalCoordinates=use_maximal_coordinates,
+    return _create_body(
+        visual_shape_id,
+        collision_shape_id,
+        cube_cfg,
+        base_position,
+        use_maximal_coordinates,
+        base_orientation=p.getQuaternionFromEuler([0, 0, math.pi / 2]),
     )
-    p.changeDynamics(cube_id, -1, lateralFriction=cube_cfg["lateral_friction"])
-    return cube_id
 
 
 def create_cube_stack(
@@ -98,36 +103,20 @@ def create_cube_stack(
     z_spacing = stack_cfg["z_spacing"]
 
     for i in range(count):
-        cube_id = p.createMultiBody(
-            baseMass=cube_cfg["mass"],
-            baseCollisionShapeIndex=collision_shape_id,
-            baseVisualShapeIndex=visual_shape_id,
-            basePosition=[base_pos[0], base_pos[1], base_pos[2] + z_spacing * i],
-            useMaximalCoordinates=use_maximal_coordinates,
+        cubes.append(
+            create_cube_org(
+                visual_shape_id,
+                collision_shape_id,
+                cube_cfg,
+                [base_pos[0], base_pos[1], base_pos[2] + z_spacing * i],
+                use_maximal_coordinates,
+            )
         )
-        p.changeDynamics(cube_id, -1, lateralFriction=cube_cfg["lateral_friction"])
-        cubes.append(cube_id)
 
     return cubes
 
 def create_robot_shapes(robot_cfg: dict) -> tuple[int, int]:
-    visual_shape_id = p.createVisualShape(
-        shapeType=p.GEOM_MESH,
-        fileName=robot_cfg["mesh_file"],
-        rgbaColor=robot_cfg["visual_rgba"],
-        specularColor=robot_cfg["visual_specular"],
-        visualFramePosition=robot_cfg["frame_shift"],
-        meshScale=robot_cfg["robot_scale"],
-    )
-
-    collision_shape_id = p.createCollisionShape(
-        shapeType=p.GEOM_MESH,
-        fileName=robot_cfg["mesh_file"],
-        collisionFramePosition=robot_cfg["frame_shift"],
-        meshScale=robot_cfg["robot_scale"],
-    )
-
-    return visual_shape_id, collision_shape_id
+    return _create_mesh_shape_pair(robot_cfg, "robot_scale")
 
 def create_robot(
     visual_shape_id: int,
@@ -136,15 +125,13 @@ def create_robot(
     base_position: List[float],
     use_maximal_coordinates: bool,
 ) -> int:
-    robot_id = p.createMultiBody(
-        baseMass=robot_cfg["mass"],
-        baseCollisionShapeIndex=collision_shape_id,
-        baseVisualShapeIndex=visual_shape_id,
-        basePosition=base_position,
-        useMaximalCoordinates=use_maximal_coordinates,
+    return _create_body(
+        visual_shape_id,
+        collision_shape_id,
+        robot_cfg,
+        base_position,
+        use_maximal_coordinates,
     )
-    p.changeDynamics(robot_id, -1, lateralFriction=robot_cfg["lateral_friction"])
-    return robot_id
 
 @dataclass
 class rob_info:
@@ -426,12 +413,6 @@ class rob_info:
         task.setup(target_pos, self.robot_id)
         task.begin(self.robot_id)
 
-    def move_to_smooth(self, target_pos: List[float]) -> None:
-        sim_cfg = cfg["simulation"]
-        time_step = sim_cfg["time_step"]
-        move_steps = cfg["motion"]["move_steps"]
-        move_base_tar(self.robot_id, target_pos, [0, 0, 0, 1], max(1, move_steps // 3), time_step)
-
     def step_forward(self, from_node, to_node) -> None:
         """
         Move one step on 3D path with dual-platform locking semantics.
@@ -482,26 +463,3 @@ class rob_info:
 
         # Next step swaps fixed platform (new support platform is the one just moved).
         self.fixed_platform = moving_name
-        
-@dataclass
-class rob_new_info:
-    robot_id: int
-    base_id: int
-    cube_picked: dict[int, bool]
-    has_load: bool = False
-    load_cube_id: int | None = None
-    glue_cid: int | None = None
-
-    def glue_to_cube(self, cube_id: int) -> None:
-        self.glue_cid = try_glue(self.robot_id, cube_id, link_a=self.base_id, link_b=-1)
-    
-    def rotate(self, angle: float) -> None:
-        rotate_to(self.robot_id, angle)
-
-    def move_dir(self, target_pos: List[float], target_dir: List[float]) -> None:
-            sim_cfg = cfg["simulation"]
-            time_step = sim_cfg["time_step"]
-            move_steps = cfg["motion"]["move_steps"]
-            self.base_id = move_rob_dir(self.robot_id, self.base_id, target_pos, target_dir, max(1, move_steps // 3), time_step)
-
-

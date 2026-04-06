@@ -1,12 +1,14 @@
 from __future__ import annotations
-import pybullet as p
+from typing import Any, Dict
+
 import numpy as np
-from typing import Dict, Any
-from python_motion_planning import *
+import pybullet as p
+
 from config_loader import load_config
 from control.move import goto, move_base_dir, move_base_tar
 from control.plan import Grid, motionplan
 from control.dstar_surface_3d import DStarLiteSurface3D, Node, NORM, FACES
+from python_motion_planning.common import *
 
 cfg = load_config()
 scaling_factor = cfg["simulation"]["scaling_factor"]
@@ -21,28 +23,25 @@ def set_cube_collisions(top_cube: int, base: int, plane_id: int, enabled: bool) 
     p.setCollisionFilterPair(top_cube, base, -1, -1, flag)
     p.setCollisionFilterPair(top_cube, plane_id, -1, -1, flag)
 
-def _set_collision_with_all(body_id: int, enabled: bool) -> None:
+def _set_collision_pairs(body_id: int, enabled: bool, include_links: bool = False) -> None:
     flag = 1 if enabled else 0
-    n = p.getNumBodies()
-    for i in range(n):
-        other_id = p.getBodyUniqueId(i)
-        if other_id != body_id:
-            p.setCollisionFilterPair(body_id, other_id, -1, -1, flag)
-
-
-def _set_collision_with_all_links(body_id: int, enabled: bool) -> None:
-    """Enable/disable collisions between all links of body_id and all links of other bodies."""
-    flag = 1 if enabled else 0
-    body_links = [-1] + list(range(p.getNumJoints(body_id)))
-    n_bodies = p.getNumBodies()
-    for i in range(n_bodies):
+    body_links = [-1] + list(range(p.getNumJoints(body_id))) if include_links else [-1]
+    for i in range(p.getNumBodies()):
         other_id = p.getBodyUniqueId(i)
         if other_id == body_id:
             continue
-        other_links = [-1] + list(range(p.getNumJoints(other_id)))
+        other_links = [-1] + list(range(p.getNumJoints(other_id))) if include_links else [-1]
         for la in body_links:
             for lb in other_links:
                 p.setCollisionFilterPair(body_id, other_id, la, lb, flag)
+
+
+def _set_collision_with_all(body_id: int, enabled: bool) -> None:
+    _set_collision_pairs(body_id, enabled, include_links=False)
+
+
+def _set_collision_with_all_links(body_id: int, enabled: bool) -> None:
+    _set_collision_pairs(body_id, enabled, include_links=True)
 
 
 
@@ -86,20 +85,24 @@ def pickup_cube(cubeid: int, robotid: int) -> None:
     # 移动期间禁用与所有物体碰撞，保证“不会与任何物体发生碰撞”
     _set_collision_with_all(cubeid, enabled=False)
 
-    if z_diff > z_threshold:
-        # 先Z后XY再Z
-        wp1 = [cube_pos[0], cube_pos[1], safe_z]
-        wp2 = [target_pos[0], target_pos[1], safe_z]
-        wp3 = target_pos
-        move_base_tar(cubeid, wp1, cube_orn, max(1, move_steps // 3), time_step)
-        move_base_tar(cubeid, wp2, cube_orn, max(1, move_steps // 3), time_step)
-        move_base_tar(cubeid, wp3, cube_orn, max(1, move_steps - 2 * (move_steps // 3)), time_step)
-    else:
-        # 先XY后Z
-        wp1 = [target_pos[0], target_pos[1], cube_pos[2]]
-        wp2 = target_pos
-        move_base_tar(cubeid, wp1, cube_orn, max(1, move_steps // 2), time_step)
-        move_base_tar(cubeid, wp2, cube_orn, max(1, move_steps - (move_steps // 2)), time_step)
+    waypoints = (
+        [
+            [cube_pos[0], cube_pos[1], safe_z],
+            [target_pos[0], target_pos[1], safe_z],
+            target_pos,
+        ]
+        if z_diff > z_threshold
+        else [
+            [target_pos[0], target_pos[1], cube_pos[2]],
+            target_pos,
+        ]
+    )
+    base_steps = max(1, move_steps // len(waypoints))
+    remaining = move_steps
+    for index, waypoint in enumerate(waypoints):
+        segment_steps = remaining if index == len(waypoints) - 1 else base_steps
+        move_base_tar(cubeid, waypoint, cube_orn, max(1, segment_steps), time_step)
+        remaining -= segment_steps
 
     reset_cube_velocity(cubeid)
     _set_collision_with_all(cubeid, enabled=True)
@@ -223,9 +226,6 @@ class MoveToTargetTask:
         self.current_i = 0
         # Path planning is 2D, so keep the robot at its current height.
         self.cruise_z = p.getBasePositionAndOrientation(robot_id)[0][2]
-
-    def reset(self, t0: float):
-        self.reached = False
 
     def begin(self, robot_id: int) -> None:
         if not self.tragetory:
