@@ -121,17 +121,6 @@ def main() -> None:
         sim_cfg["use_maximal_coordinates"],
     )
 
-    robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
-    robot1_id = create_robot(
-        robv_shape_id,
-        robc_shape_id,
-        cfg["robot"],
-        [6.5,1,1],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    #robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
-    rob_num+=1
-
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
     start_base_pos, start_base_orn = _spawn_pose_from_start_node(start)
     robot2_id = p.loadURDF(
@@ -144,6 +133,17 @@ def main() -> None:
     #_set_collision_with_all_links(robot2_id, enabled=False)
     
     robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
+    rob_num+=1
+
+    robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
+    robot1_id = create_robot(
+        robv_shape_id,
+        robc_shape_id,
+        cfg["robot"],
+        [6.5,1,1],
+        sim_cfg["use_maximal_coordinates"],
+    )
+    #robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
     rob_num+=1
 
     robot_id = p.loadURDF(
@@ -192,23 +192,23 @@ def main() -> None:
 
     task.begin()
 
-    for x in range(len(cube_stacks)):
-        for y in range(len(cube_stacks[x])):
-            stack = cube_stacks[x][y]
-            j = 0
-            while j < len(stack):
-                top_cube = stack[-1 - j]
-                robots_info[0].pick_up(top_cube)
+    # for x in range(len(cube_stacks)):
+    #     for y in range(len(cube_stacks[x])):
+    #         stack = cube_stacks[x][y]
+    #         j = 0
+    #         while j < len(stack):
+    #             top_cube = stack[-1 - j]
+    #             robots_info[1].pick_up(top_cube)
 
-                step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
+    #             step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
 
-                robots_info[0].rotate(0)
-                robots_info[0].move_to([10 + y * 1, 10 + j * 1, 0], cube_stacks)
-                robots_info[0].rotate(math.pi)
-                robots_info[0].drop(obj_dict)
-                step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
-                robots_info[0].move_to([6.5 + x * 1, 1 + y * 1, 0], cube_stacks)
-                j += 1
+    #             robots_info[1].rotate(0)
+    #             robots_info[1].move_to([10 + y * 1, 10 + j * 1, 0], cube_stacks)
+    #             robots_info[1].rotate(math.pi)
+    #             robots_info[1].drop(obj_dict)
+    #             step_simulation(sim_cfg["settle_steps"], sim_cfg["time_step"])
+    #             robots_info[1].move_to([6.5 + x * 1, 1 + y * 1, 0], cube_stacks)
+    #             j += 1
 
     #top_cube1 = get_top_cube(cube_stacks[0])
     #top_cube2 = get_top_cube(cube_stacks[1])
