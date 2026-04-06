@@ -274,8 +274,8 @@ class rob_info:
         z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
         center_offset = -self._platform_contact_sign(platform_name) * self.PLATFORM_HALF_THICKNESS
         return (
-            face_mid[0] + z_axis[0] * center_offset,
-            face_mid[1] + z_axis[1] * center_offset,
+            face_mid[0] + z_axis[0] * center_offset+0.5,
+            face_mid[1] + z_axis[1] * center_offset+0.5,
             face_mid[2] + z_axis[2] * center_offset,
         )
 
@@ -310,15 +310,40 @@ class rob_info:
         p.changeConstraint(cid, maxForce=max_force)
         return cid
 
-    def _smooth_apply_ik(self, target_link: int, target_pos, target_orn, steps: int = 180) -> None:
+    def _calculate_ik_for_platform_target(self, target_link: int, target_pos, target_orn):
+        if target_link != self.BASE_PLATFORM_LINK:
+            return p.calculateInverseKinematics(
+                self.robot_id,
+                target_link,
+                target_pos,
+                target_orn,
+                maxNumIterations=200,
+                residualThreshold=1e-5,
+            )
+
+        fixed_end_pos, fixed_end_orn = self._link_pose(self.END_PLATFORM_LINK)
+        base_pos, base_orn = p.getBasePositionAndOrientation(self.robot_id)
+        joint_states = [
+            (j, p.getJointState(self.robot_id, j)[0])
+            for j in range(p.getNumJoints(self.robot_id))
+        ]
+
+        p.resetBasePositionAndOrientation(self.robot_id, target_pos, target_orn)
         ik = p.calculateInverseKinematics(
             self.robot_id,
-            target_link,
-            target_pos,
-            target_orn,
+            self.END_PLATFORM_LINK,
+            fixed_end_pos,
+            fixed_end_orn,
             maxNumIterations=200,
             residualThreshold=1e-5,
         )
+        p.resetBasePositionAndOrientation(self.robot_id, base_pos, base_orn)
+        for j, q in joint_states:
+            p.resetJointState(self.robot_id, j, q)
+        return ik
+
+    def _smooth_apply_ik(self, target_link: int, target_pos, target_orn, steps: int = 180) -> None:
+        ik = self._calculate_ik_for_platform_target(target_link, target_pos, target_orn)
         revolute_joints = []
         for j in range(p.getNumJoints(self.robot_id)):
             jt = p.getJointInfo(self.robot_id, j)[2]
@@ -333,10 +358,7 @@ class rob_info:
         for i in range(steps):
             t = (i + 1) / max(1, steps)
             s = t * t * (3.0 - 2.0 * t)
-            for j in revolute_joints:
-                if j >= len(ik):
-                    continue
-                tj = ik[j]
+            for j, tj in zip(revolute_joints, ik):
                 q = cur[j] + (tj - cur[j]) * s
                 p.setJointMotorControl2(
                     self.robot_id,
@@ -423,6 +445,16 @@ class rob_info:
             self.moving_anchor_id = None
         self.moving_anchor_id = self._create_anchor(target_moving_pos, target_moving_orn)
         self.moving_cid = self._create_lock_to_anchor(moving_link, self.moving_anchor_id)
+
+        # The moved platform becomes the next support; release the previous support.
+        if self.fixed_cid is not None:
+            p.removeConstraint(self.fixed_cid)
+        if self.fixed_anchor_id is not None:
+            p.removeBody(self.fixed_anchor_id)
+        self.fixed_cid = self.moving_cid
+        self.fixed_anchor_id = self.moving_anchor_id
+        self.moving_cid = None
+        self.moving_anchor_id = None
 
         # Cache orientations for next-step orientation logic.
         base_pos, base_orn = self._link_pose(self.BASE_PLATFORM_LINK)
