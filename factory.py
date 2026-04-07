@@ -310,6 +310,14 @@ class rob_info:
         p.changeConstraint(cid, maxForce=max_force)
         return cid
 
+    def _movable_joints(self) -> list[int]:
+        joints = []
+        for j in range(p.getNumJoints(self.robot_id)):
+            jt = p.getJointInfo(self.robot_id, j)[2]
+            if jt == p.JOINT_REVOLUTE or jt == p.JOINT_PRISMATIC:
+                joints.append(j)
+        return joints
+
     def _calculate_ik_for_platform_target(self, target_link: int, target_pos, target_orn):
         if target_link != self.BASE_PLATFORM_LINK:
             return p.calculateInverseKinematics(
@@ -342,13 +350,15 @@ class rob_info:
             p.resetJointState(self.robot_id, j, q)
         return ik
 
-    def _smooth_apply_ik(self, target_link: int, target_pos, target_orn, steps: int = 180) -> None:
+    def _smooth_apply_ik(
+        self,
+        target_link: int,
+        target_pos,
+        target_orn,
+        steps: int = 180,
+    ) -> None:
         ik = self._calculate_ik_for_platform_target(target_link, target_pos, target_orn)
-        revolute_joints = []
-        for j in range(p.getNumJoints(self.robot_id)):
-            jt = p.getJointInfo(self.robot_id, j)[2]
-            if jt == p.JOINT_REVOLUTE or jt == p.JOINT_PRISMATIC:
-                revolute_joints.append(j)
+        revolute_joints = self._movable_joints()
 
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
@@ -367,6 +377,16 @@ class rob_info:
                     targetPosition=q,
                     force=max_force,
                 )
+            p.stepSimulation()
+            time.sleep(dt)
+
+        # Make the terminal state exact before creating the next fixed constraint.
+        for j, tj in zip(revolute_joints, ik):
+            p.resetJointState(self.robot_id, j, tj)
+        if target_link == self.BASE_PLATFORM_LINK:
+            p.resetBasePositionAndOrientation(self.robot_id, target_pos, target_orn)
+            p.resetBaseVelocity(self.robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+        for _ in range(10):
             p.stepSimulation()
             time.sleep(dt)
 
