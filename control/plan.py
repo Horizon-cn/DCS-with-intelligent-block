@@ -7,16 +7,10 @@ from config_loader import load_config
 cfg = load_config()
 scaling_factor = cfg["simulation"]["scaling_factor"]
 
-def to_grid(point):
-        return tuple(int(round(v * scaling_factor)) for v in point)
-
-def to_world(path):
-        return [tuple(v / scaling_factor for v in p) for p in path]
-
 def motionplan(robot_id, map_, target_pos):
 
-    start = to_grid(p.getBasePositionAndOrientation(robot_id)[0][:2])
-    goal = to_grid(target_pos[:2])
+    start = tuple(int(round(v * scaling_factor)) for v in p.getBasePositionAndOrientation(robot_id)[0][:2])
+    goal = tuple(int(round(v * scaling_factor)) for v in target_pos[:2])
     #print(f"Start: {start}, Goal: {goal}")
     
     planner = AStar(map_=map_, start=start, goal=goal)
@@ -28,6 +22,6 @@ def motionplan(robot_id, map_, target_pos):
     vis.show()
     vis.close()
 
-    world_path = to_world(path)
+    world_path = [tuple(v / scaling_factor for v in point) for point in path]
     #print(world_path)
     return world_path

@@ -36,14 +36,6 @@ def _set_collision_pairs(body_id: int, enabled: bool, include_links: bool = Fals
                 p.setCollisionFilterPair(body_id, other_id, la, lb, flag)
 
 
-def _set_collision_with_all(body_id: int, enabled: bool) -> None:
-    _set_collision_pairs(body_id, enabled, include_links=False)
-
-
-def _set_collision_with_all_links(body_id: int, enabled: bool) -> None:
-    _set_collision_pairs(body_id, enabled, include_links=True)
-
-
 
 def reset_cube_velocity(obj: int) -> None:
     p.resetBaseVelocity(obj, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
@@ -83,7 +75,7 @@ def pickup_cube(cubeid: int, robotid: int) -> None:
     z_threshold = 0.3
 
     # 移动期间禁用与所有物体碰撞，保证“不会与任何物体发生碰撞”
-    _set_collision_with_all(cubeid, enabled=False)
+    _set_collision_pairs(cubeid, enabled=False, include_links=False)
 
     waypoints = (
         [
@@ -105,7 +97,7 @@ def pickup_cube(cubeid: int, robotid: int) -> None:
         remaining -= segment_steps
 
     reset_cube_velocity(cubeid)
-    _set_collision_with_all(cubeid, enabled=True)
+    _set_collision_pairs(cubeid, enabled=True, include_links=False)
 
 
 def drop_cube(top_cube, robotid, obj_dicts) -> None:
@@ -453,7 +445,7 @@ class DynamicMoveToTargetTask:
 
         self.reached = False
         # Disable collisions for the whole articulated robot during D* execution.
-        _set_collision_with_all_links(self.robot_id, enabled=False)
+        _set_collision_pairs(self.robot_id, enabled=False, include_links=True)
 
         try:
             while not self.reached:
@@ -503,9 +495,17 @@ class DynamicMoveToTargetTask:
                         self.reached = True
                         break
 
+                    prev_node = self.path[self.current_i - 1] if self.current_i > 0 else None
                     from_node = self.path[self.current_i]
                     to_node = self.path[self.current_i + 1]
-                    self.rob.step_forward(from_node, to_node)
+                    spatial_path = None
+                    if prev_node is not None and hasattr(self.planner, "transition_spatial_path_via_current_center"):
+                        spatial_path = self.planner.transition_spatial_path_via_current_center(
+                            prev_node,
+                            from_node,
+                            to_node,
+                        )
+                    self.rob.step_forward(from_node, to_node, prev_node=prev_node, spatial_path=spatial_path)
                     self.current_i += 1
                     continue
 

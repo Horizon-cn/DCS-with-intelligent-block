@@ -291,20 +291,48 @@ class DStarLiteSurface3D:
                 return False
         return True
 
-    def _sphere_surface_path_exists(
+    @staticmethod
+    def _bfs_path(adj: List[Set[int]], start_idx: int, goal_idx: int) -> Optional[List[int]]:
+        q: deque[int] = deque([start_idx])
+        parent: Dict[int, Optional[int]] = {start_idx: None}
+        while q:
+            u = q.popleft()
+            if u == goal_idx:
+                path_idx: List[int] = []
+                cur: Optional[int] = u
+                while cur is not None:
+                    path_idx.append(cur)
+                    cur = parent[cur]
+                path_idx.reverse()
+                return path_idx
+            for v in adj[u]:
+                if v in parent:
+                    continue
+                parent[v] = u
+                q.append(v)
+        return None
+
+    def _sphere_surface_path(
         self,
         center: Tuple[float, float, float],
         start: Tuple[float, float, float],
         end: Tuple[float, float, float],
         radius: float,
         n_dirs: int = 48,
-    ) -> bool:
-        """Check if a collision-free path exists constrained to one sphere surface."""
+    ) -> Optional[List[Tuple[float, float, float]]]:
+        """Return one collision-free path constrained to one sphere surface."""
         if radius < 1e-9:
-            return False
+            return None
 
-        if self._arc_path_is_clear(center, start, end):
-            return True
+        arc_pts = self._arc_points_around_center(center, start, end)
+        if arc_pts is not None:
+            ok = True
+            for i in range(len(arc_pts) - 1):
+                if not self._segment_is_clear(arc_pts[i], arc_pts[i + 1]):
+                    ok = False
+                    break
+            if ok:
+                return arc_pts
 
         dirs = self._fibonacci_unit_dirs(n_dirs)
         points: List[Tuple[float, float, float]] = [start, end]
@@ -324,7 +352,7 @@ class DStarLiteSurface3D:
             adj.append(set())
 
         if not sample_to_idx:
-            return False
+            return None
 
         def add_edge(i: int, j: int) -> None:
             if i == j or j in adj[i]:
@@ -372,18 +400,133 @@ class DStarLiteSurface3D:
         connect_endpoint(0)
         connect_endpoint(1)
 
-        q: deque[int] = deque([0])
-        seen: Set[int] = {0}
-        while q:
-            u = q.popleft()
-            if u == 1:
-                return True
-            for v in adj[u]:
-                if v in seen:
+        idx_path = self._bfs_path(adj, 0, 1)
+        if idx_path is None:
+            return None
+        return [points[i] for i in idx_path]
+
+    def _sphere_surface_path_exists(
+        self,
+        center: Tuple[float, float, float],
+        start: Tuple[float, float, float],
+        end: Tuple[float, float, float],
+        radius: float,
+        n_dirs: int = 48,
+    ) -> bool:
+        return self._sphere_surface_path(center, start, end, radius, n_dirs=n_dirs) is not None
+
+    def _spherical_shell_path(
+        self,
+        center: Tuple[float, float, float],
+        start: Tuple[float, float, float],
+        end: Tuple[float, float, float],
+        max_radius_samples: int = 9,
+    ) -> Optional[List[Tuple[float, float, float]]]:
+        """Return one collision-free path inside the spherical shell around center."""
+        v1 = (start[0] - center[0], start[1] - center[1], start[2] - center[2])
+        v2 = (end[0] - center[0], end[1] - center[1], end[2] - center[2])
+        r1 = self._norm3(v1)
+        r2 = self._norm3(v2)
+        if r1 < 1e-9 or r2 < 1e-9:
+            return None
+
+        if abs(r1 - r2) <= 1e-3:
+            return self._sphere_surface_path(center, start, end, radius=0.5 * (r1 + r2))
+
+        r_min = min(r1, r2)
+        r_max = max(r1, r2)
+        if self._segment_in_shell_is_clear(start, end, center, r_min, r_max):
+            return [start, end]
+
+        n_r = min(max_radius_samples, max(3, int(math.ceil((r_max - r_min) / 0.2)) + 1))
+        n_dirs = 36
+        dirs = self._fibonacci_unit_dirs(n_dirs)
+
+        k_dir_neighbors = 6
+        dir_neighbors: List[List[int]] = []
+        for i in range(n_dirs):
+            scored: List[Tuple[float, int]] = []
+            di = dirs[i]
+            for j in range(n_dirs):
+                if i == j:
                     continue
-                seen.add(v)
-                q.append(v)
-        return False
+                dj = dirs[j]
+                scored.append((di[0] * dj[0] + di[1] * dj[1] + di[2] * dj[2], j))
+            scored.sort(reverse=True)
+            dir_neighbors.append([j for _, j in scored[:k_dir_neighbors]])
+
+        radius_levels = [r_min + (r_max - r_min) * (i / max(1, n_r - 1)) for i in range(n_r)]
+
+        points: List[Tuple[float, float, float]] = [start, end]
+        adj: List[Set[int]] = [set(), set()]
+
+        sample_idx: Dict[Tuple[int, int], int] = {}
+        for ri, r in enumerate(radius_levels):
+            for di, u in enumerate(dirs):
+                p = (center[0] + u[0] * r, center[1] + u[1] * r, center[2] + u[2] * r)
+                if self._point_strictly_inside_obstacle(p):
+                    continue
+                sample_idx[(ri, di)] = len(points)
+                points.append(p)
+                adj.append(set())
+
+        def add_edge(i: int, j: int) -> None:
+            if i == j or j in adj[i]:
+                return
+            if self._segment_in_shell_is_clear(points[i], points[j], center, r_min, r_max):
+                adj[i].add(j)
+                adj[j].add(i)
+
+        for ri in range(n_r - 1):
+            for di in range(n_dirs):
+                a = sample_idx.get((ri, di))
+                b = sample_idx.get((ri + 1, di))
+                if a is not None and b is not None:
+                    add_edge(a, b)
+
+        for ri in range(n_r):
+            for di in range(n_dirs):
+                a = sample_idx.get((ri, di))
+                if a is None:
+                    continue
+                for dj in dir_neighbors[di]:
+                    b = sample_idx.get((ri, dj))
+                    if b is not None:
+                        add_edge(a, b)
+
+        def connect_endpoint(endpoint_idx: int) -> None:
+            ep = points[endpoint_idx]
+            base_radius = max(0.8, 0.6 + 0.3 * (r_max - r_min))
+            near: List[int] = []
+            ranked: List[Tuple[float, int]] = []
+            for j in range(2, len(points)):
+                d = self._norm3((points[j][0] - ep[0], points[j][1] - ep[1], points[j][2] - ep[2]))
+                ranked.append((d, j))
+                if d <= base_radius:
+                    near.append(j)
+
+            for j in near:
+                add_edge(endpoint_idx, j)
+
+            if adj[endpoint_idx]:
+                return
+
+            ranked.sort(key=lambda x: x[0])
+            added = 0
+            for _, j in ranked[:16]:
+                add_edge(endpoint_idx, j)
+                if j in adj[endpoint_idx]:
+                    added += 1
+                if added >= 4:
+                    break
+
+        connect_endpoint(0)
+        connect_endpoint(1)
+
+        idx_path = self._bfs_path(adj, 0, 1)
+        if idx_path is None:
+            return None
+        return [points[i] for i in idx_path]
 
     def _spherical_shell_path_exists(
         self,
@@ -520,15 +663,24 @@ class DStarLiteSurface3D:
 
         return False
 
+    def transition_spatial_path_via_current_center(
+        self,
+        prev_node: Node,
+        cur_node: Node,
+        next_node: Node,
+    ) -> Optional[List[Tuple[float, float, float]]]:
+        """Return one feasible spatial path from prev->next around cur face midpoint."""
+        c = self.node_to_face_midpoint(cur_node)
+        p0 = self.node_to_face_midpoint(prev_node)
+        p1 = self.node_to_face_midpoint(next_node)
+        return self._spherical_shell_path(c, p0, p1)
+
     def _transition_reachable_via_current_center(self, prev_node: Node, cur_node: Node, next_node: Node) -> bool:
         """
         Check whether a collision-free trajectory exists from prev_node to next_node
         in the spherical shell centered at cur_node's face midpoint.
         """
-        c = self.node_to_face_midpoint(cur_node)
-        p0 = self.node_to_face_midpoint(prev_node)
-        p1 = self.node_to_face_midpoint(next_node)
-        return self._spherical_shell_path_exists(c, p0, p1)
+        return self.transition_spatial_path_via_current_center(prev_node, cur_node, next_node) is not None
 
     def available_face_dirs(self, free_v: Tuple[int, int, int]) -> List[str]:
         """Directions from free_v center toward adjacent obstacle surfaces."""

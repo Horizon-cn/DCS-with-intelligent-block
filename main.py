@@ -10,9 +10,8 @@ from config_loader import load_config
 from control.dstar_surface_3d import DStarLiteSurface3D, FACES, NORM, Node
 from control.motion import DynamicMoveToTargetTask
 from factory import (
-    create_cube_org,
     create_cube_shapes,
-    create_cube_shapes_org,
+    create_cube,
     create_cube_stack,
     create_robot,
     create_robot_shapes,
@@ -122,8 +121,8 @@ def main() -> None:
             break
     print(f"Randomly sampled start node: pos={start.pos}, face_dir={start.face_dir}")   
 
-    cubev_shape_id, cubec_shape_id = create_cube_shapes_org(cfg["cube_org"])
-    cube_id = create_cube_org(
+    cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube_org"])
+    cube_id = create_cube(
         cubev_shape_id,
         cubec_shape_id,
         cfg["cube_org"],
@@ -138,10 +137,8 @@ def main() -> None:
         basePosition=[1,8,1],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,
-        globalScaling=1.25,
+        globalScaling=1.1,
     )
-    #_set_collision_with_all_links(robot2_id, enabled=False)
-    
     robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
     rob_num+=1
 

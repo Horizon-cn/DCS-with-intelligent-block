@@ -50,24 +50,6 @@ def _create_body(
     return body_id
 
 
-def create_cube_shapes_org(cube_cfg: dict) -> tuple[int, int]:
-    return _create_mesh_shape_pair(cube_cfg, "cube_scale")
-
-def create_cube_org(
-    visual_shape_id: int,
-    collision_shape_id: int,
-    cube_cfg: dict,
-    base_position: List[float],
-    use_maximal_coordinates: bool,
-) -> int:
-    return _create_body(
-        visual_shape_id,
-        collision_shape_id,
-        cube_cfg,
-        base_position,
-        use_maximal_coordinates,
-    )
-
 def create_cube_shapes(cube_cfg: dict) -> tuple[int, int]:
     return _create_mesh_shape_pair(cube_cfg, "cube_scale")
 
@@ -77,6 +59,7 @@ def create_cube(
     cube_cfg: dict,
     base_position: List[float],
     use_maximal_coordinates: bool,
+    base_orientation: tuple[float, float, float, float] | None = None,
 ) -> int:
     return _create_body(
         visual_shape_id,
@@ -84,7 +67,7 @@ def create_cube(
         cube_cfg,
         base_position,
         use_maximal_coordinates,
-        base_orientation=p.getQuaternionFromEuler([0, 0, math.pi / 2]),
+        base_orientation=base_orientation,
     )
 
 
@@ -104,7 +87,7 @@ def create_cube_stack(
 
     for i in range(count):
         cubes.append(
-            create_cube_org(
+            create_cube(
                 visual_shape_id,
                 collision_shape_id,
                 cube_cfg,
@@ -279,6 +262,17 @@ class rob_info:
             face_mid[2] + z_axis[2] * center_offset,
         )
 
+    def _platform_center_from_contact_point(self, contact_point, platform_orn, platform_name: str):
+        """Convert a world-space contact point to platform link center pose."""
+        rot = p.getMatrixFromQuaternion(platform_orn)
+        z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
+        center_offset = -self._platform_contact_sign(platform_name) * self.PLATFORM_HALF_THICKNESS
+        return (
+            float(contact_point[0]) + z_axis[0] * center_offset,
+            float(contact_point[1]) + z_axis[1] * center_offset,
+            float(contact_point[2]) + z_axis[2] * center_offset,
+        )
+
     def _create_anchor(self, pos, orn) -> int:
         col = p.createCollisionShape(p.GEOM_SPHERE, radius=1e-3)
         vis = p.createVisualShape(p.GEOM_SPHERE, radius=1e-3, rgbaColor=[1, 1, 0, 0])
@@ -356,6 +350,7 @@ class rob_info:
         target_pos,
         target_orn,
         steps: int = 180,
+        smooth: bool = True,
     ) -> None:
         ik = self._calculate_ik_for_platform_target(target_link, target_pos, target_orn)
         revolute_joints = self._movable_joints()
@@ -363,11 +358,11 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = sim_cfg["time_step"]
-        max_force = 1200
+        max_force = 2500
 
         for i in range(steps):
             t = (i + 1) / max(1, steps)
-            s = t * t * (3.0 - 2.0 * t)
+            s = t * t * (3.0 - 2.0 * t) if smooth else t
             for j, tj in zip(revolute_joints, ik):
                 q = cur[j] + (tj - cur[j]) * s
                 p.setJointMotorControl2(
@@ -425,7 +420,7 @@ class rob_info:
         task.setup(target_pos, self.robot_id)
         task.begin(self.robot_id)
 
-    def step_forward(self, from_node, to_node) -> None:
+    def step_forward(self, from_node, to_node, prev_node=None, spatial_path=None) -> None:
         """
         Move one step on 3D path with dual-platform locking semantics.
         - First step defaults to fixed base platform.
@@ -454,7 +449,31 @@ class rob_info:
         target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_contact_pos, moving_name)
         target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn, moving_name)
         print(f"Moving {moving_name} from {fixed_name} contact at {fixed_contact_pos} to target node at {to_node.pos} with orientation {target_moving_orn}")
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=360)
+
+        # If planner provides a feasible shell/surface path, follow intermediate
+        # contact waypoints to reduce large IK jumps.
+        if spatial_path and len(spatial_path) > 2:
+            inner_points = [tuple(float(v) for v in pt) for pt in spatial_path[1:-1]]
+            max_inner = 10
+            if len(inner_points) > max_inner:
+                stride = max(1, int(math.ceil(len(inner_points) / max_inner)))
+                inner_points = inner_points[::stride]
+
+            for contact_pt in inner_points:
+                waypoint_pos = self._platform_center_from_contact_point(
+                    contact_pt,
+                    target_moving_orn,
+                    moving_name,
+                )
+                self._smooth_apply_ik(
+                    moving_link,
+                    waypoint_pos,
+                    target_moving_orn,
+                    steps=250,
+                    smooth=False,
+                )
+
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=280)
 
         # end-state: moving platform also locked on target node plane.
         if self.moving_cid is not None:
