@@ -137,7 +137,7 @@ def main() -> None:
         basePosition=[1,8,1],
         baseOrientation=[0, 0, 0, 1],
         useFixedBase=False,
-        globalScaling=1.1,
+        globalScaling=1.2,
     )
     robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
     rob_num+=1

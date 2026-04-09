@@ -358,7 +358,7 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = sim_cfg["time_step"]
-        max_force = 2500
+        max_force = 1000
 
         for i in range(steps):
             t = (i + 1) / max(1, steps)
@@ -453,8 +453,25 @@ class rob_info:
         # If planner provides a feasible shell/surface path, follow intermediate
         # contact waypoints to reduce large IK jumps.
         if spatial_path and len(spatial_path) > 2:
-            inner_points = [tuple(float(v) for v in pt) for pt in spatial_path[1:-1]]
-            max_inner = 10
+            path_points = [tuple(float(v) for v in pt) for pt in spatial_path]
+            inner_points = path_points[1:-1]
+
+            total_len = 0.0
+            for i in range(len(path_points) - 1):
+                dx = path_points[i + 1][0] - path_points[i][0]
+                dy = path_points[i + 1][1] - path_points[i][1]
+                dz = path_points[i + 1][2] - path_points[i][2]
+                total_len += math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            target_spacing = 0.12
+            min_inner = 6
+            max_inner_cap = 24
+            adaptive_max_inner = max(
+                min_inner,
+                min(max_inner_cap, int(math.ceil(total_len / target_spacing)) - 1),
+            )
+
+            max_inner = adaptive_max_inner
             if len(inner_points) > max_inner:
                 stride = max(1, int(math.ceil(len(inner_points) / max_inner)))
                 inner_points = inner_points[::stride]
@@ -469,7 +486,7 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=250,
+                    steps=300,
                     smooth=False,
                 )
 
