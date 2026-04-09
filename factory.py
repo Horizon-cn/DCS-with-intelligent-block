@@ -454,7 +454,7 @@ class rob_info:
         target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_contact_pos, moving_name)
         target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn, moving_name)
         print(f"Moving {moving_name} from {fixed_name} contact at {fixed_contact_pos} to target node at {to_node.pos} with orientation {target_moving_orn}")
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=180)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=360)
 
         # end-state: moving platform also locked on target node plane.
         if self.moving_cid is not None:
