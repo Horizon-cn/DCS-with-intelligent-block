@@ -358,7 +358,7 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = sim_cfg["time_step"]
-        max_force = 1000
+        max_force = 200000
 
         for i in range(steps):
             t = (i + 1) / max(1, steps)
@@ -376,11 +376,11 @@ class rob_info:
             time.sleep(dt)
 
         # Make the terminal state exact before creating the next fixed constraint.
-        for j, tj in zip(revolute_joints, ik):
-            p.resetJointState(self.robot_id, j, tj)
-        if target_link == self.BASE_PLATFORM_LINK:
-            p.resetBasePositionAndOrientation(self.robot_id, target_pos, target_orn)
-            p.resetBaseVelocity(self.robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
+        #for j, tj in zip(revolute_joints, ik):
+        #    p.resetJointState(self.robot_id, j, tj)
+        #if target_link == self.BASE_PLATFORM_LINK:
+        #    p.resetBasePositionAndOrientation(self.robot_id, target_pos, target_orn)
+        #    p.resetBaseVelocity(self.robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
         for _ in range(10):
             p.stepSimulation()
             time.sleep(dt)
@@ -453,6 +453,7 @@ class rob_info:
         # If planner provides a feasible shell/surface path, follow intermediate
         # contact waypoints to reduce large IK jumps.
         if spatial_path and len(spatial_path) > 2:
+            print(f"Following spatial path with {len(spatial_path)} waypoints for smoother motion")
             path_points = [tuple(float(v) for v in pt) for pt in spatial_path]
             inner_points = path_points[1:-1]
 
@@ -486,11 +487,19 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=300,
-                    smooth=False,
+                    steps=200,
+                    smooth=True,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=280)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=300)
+
+        ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
+        revolute_joints = self._movable_joints()
+        for j, tj in zip(revolute_joints, ik):
+           p.resetJointState(self.robot_id, j, tj)
+        if moving_link == self.BASE_PLATFORM_LINK:
+           p.resetBasePositionAndOrientation(self.robot_id, target_moving_pos, target_moving_orn)
+           p.resetBaseVelocity(self.robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
 
         # end-state: moving platform also locked on target node plane.
         if self.moving_cid is not None:

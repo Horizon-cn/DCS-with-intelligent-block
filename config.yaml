@@ -1,7 +1,7 @@
 simulation:
   gravity: [0, 0, -10]
   time_step: 0.004166666666666667  # 1/240
-  solver_iterations: 10
+  solver_iterations: 200
   use_maximal_coordinates: true
   settle_steps: 80
   post_move_steps: 6000
