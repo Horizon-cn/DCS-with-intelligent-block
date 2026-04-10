@@ -351,14 +351,27 @@ class rob_info:
         target_orn,
         steps: int = 180,
         smooth: bool = True,
+        active_joint: int | None = None,
     ) -> None:
         ik = self._calculate_ik_for_platform_target(target_link, target_pos, target_orn)
         revolute_joints = self._movable_joints()
 
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
-        dt = sim_cfg["time_step"]
-        max_force = 200000
+        dt = 1/480
+        max_force = 1000000
+        pos_tol = 0.005
+        orn_tol = 0.035
+        joint_tol = 0.01
+        max_hold_steps = 800
+
+        if active_joint is not None and active_joint not in cur:
+            raise ValueError(f"active_joint {active_joint} is not a movable joint")
+
+        def _joint_target_for_step(joint_id: int, interpolated_target: float, final_target: float, final: bool) -> float:
+            if active_joint is None or joint_id == active_joint:
+                return final_target if final else interpolated_target
+            return cur[joint_id]
 
         for i in range(steps):
             t = (i + 1) / max(1, steps)
@@ -369,21 +382,48 @@ class rob_info:
                     self.robot_id,
                     j,
                     p.POSITION_CONTROL,
-                    targetPosition=q,
+                    targetPosition=_joint_target_for_step(j, q, tj, final=False),
                     force=max_force,
                 )
             p.stepSimulation()
             time.sleep(dt)
 
-        # Make the terminal state exact before creating the next fixed constraint.
-        #for j, tj in zip(revolute_joints, ik):
-        #    p.resetJointState(self.robot_id, j, tj)
-        #if target_link == self.BASE_PLATFORM_LINK:
-        #    p.resetBasePositionAndOrientation(self.robot_id, target_pos, target_orn)
-        #    p.resetBaseVelocity(self.robot_id, linearVelocity=[0, 0, 0], angularVelocity=[0, 0, 0])
-        for _ in range(10):
+        # Keep driving the final IK target until the link actually converges.
+        # This prevents motion from stopping early when fixed interpolation steps
+        # are not sufficient to physically settle at the goal.
+        for _ in range(max_hold_steps):
+            for j, tj in zip(revolute_joints, ik):
+                p.setJointMotorControl2(
+                    self.robot_id,
+                    j,
+                    p.POSITION_CONTROL,
+                    targetPosition=_joint_target_for_step(j, tj, tj, final=True),
+                    force=max_force,
+                )
             p.stepSimulation()
             time.sleep(dt)
+
+            cur_pos, cur_orn = self._link_pose(target_link)
+            pos_err = math.sqrt(
+                (cur_pos[0] - target_pos[0]) ** 2
+                + (cur_pos[1] - target_pos[1]) ** 2
+                + (cur_pos[2] - target_pos[2]) ** 2
+            )
+            dot_q = abs(
+                cur_orn[0] * target_orn[0]
+                + cur_orn[1] * target_orn[1]
+                + cur_orn[2] * target_orn[2]
+                + cur_orn[3] * target_orn[3]
+            )
+            dot_q = max(-1.0, min(1.0, dot_q))
+            orn_err = 2.0 * math.acos(dot_q)
+            joint_err = 0.0
+            for j, tj in zip(revolute_joints, ik):
+                target_q = tj if active_joint is None or j == active_joint else cur[j]
+                joint_err = max(joint_err, abs(p.getJointState(self.robot_id, j)[0] - target_q))
+
+            if pos_err <= pos_tol and orn_err <= orn_tol and joint_err <= joint_tol:
+                break
 
     def _compute_target_orientation(self, from_node, to_node, fixed_platform_pos, moving_platform_name: str):
         return self._platform_orientation_for_face(to_node.face_dir, moving_platform_name)
@@ -487,8 +527,8 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=200,
-                    smooth=True,
+                    steps=300,
+                    smooth=False,
                 )
 
         self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=300)

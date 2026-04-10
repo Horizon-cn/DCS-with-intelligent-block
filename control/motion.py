@@ -445,7 +445,7 @@ class DynamicMoveToTargetTask:
 
         self.reached = False
         # Disable collisions for the whole articulated robot during D* execution.
-        _set_collision_pairs(self.robot_id, enabled=False, include_links=True)
+        #_set_collision_pairs(self.robot_id, enabled=False, include_links=True)
 
         try:
             while not self.reached:
