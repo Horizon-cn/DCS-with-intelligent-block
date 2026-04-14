@@ -143,9 +143,21 @@ class rob_info:
         "+Z": (0.0, 0.0, 1.0), "-Z": (0.0, 0.0, -1.0),
     }
 
+    def _find_link_index_by_name(self, link_name: str) -> int:
+        for joint_idx in range(p.getNumJoints(self.robot_id)):
+            child_link_name = p.getJointInfo(self.robot_id, joint_idx)[12].decode("utf-8")
+            if child_link_name == link_name:
+                return joint_idx
+        raise ValueError(f"Link {link_name!r} not found for robot {self.robot_id}")
+
     def __post_init__(self) -> None:
+        self.END_PLATFORM_LINK = self._find_link_index_by_name("end_platform")
         _, self.base_platform_orientation = p.getBasePositionAndOrientation(self.robot_id)
         end_state = p.getLinkState(self.robot_id, self.END_PLATFORM_LINK)
+        if end_state is None:
+            raise ValueError(
+                f"Failed to get link state for end_platform link index {self.END_PLATFORM_LINK}"
+            )
         self.end_platform_orientation = end_state[1]
 
     def _platform_link(self, name: str) -> int:
@@ -312,13 +324,44 @@ class rob_info:
                 joints.append(j)
         return joints
 
+    def _ik_joint_limit_kwargs(self) -> dict:
+        """Build joint limit arguments for PyBullet IK from the current URDF."""
+        lower_limits = []
+        upper_limits = []
+        joint_ranges = []
+        rest_poses = []
+
+        for joint_id in self._movable_joints():
+            joint_info = p.getJointInfo(self.robot_id, joint_id)
+            lower = float(joint_info[8])
+            upper = float(joint_info[9])
+
+            # Fall back to a wide range if the URDF does not provide a valid bounded interval.
+            if upper < lower:
+                lower = -2.0 * math.pi
+                upper = 2.0 * math.pi
+
+            lower_limits.append(lower)
+            upper_limits.append(upper)
+            joint_ranges.append(max(1e-6, upper - lower))
+            rest_poses.append(float(p.getJointState(self.robot_id, joint_id)[0]))
+
+        return {
+            "lowerLimits": lower_limits,
+            "upperLimits": upper_limits,
+            "jointRanges": joint_ranges,
+            "restPoses": rest_poses,
+        }
+
     def _calculate_ik_for_platform_target(self, target_link: int, target_pos, target_orn):
+        ik_kwargs = self._ik_joint_limit_kwargs()
         if target_link != self.BASE_PLATFORM_LINK:
             return p.calculateInverseKinematics(
                 self.robot_id,
                 target_link,
                 target_pos,
                 target_orn,
+                **ik_kwargs,
                 maxNumIterations=200,
                 residualThreshold=1e-5,
             )
@@ -336,6 +379,7 @@ class rob_info:
             self.END_PLATFORM_LINK,
             fixed_end_pos,
             fixed_end_orn,
+            **ik_kwargs,
             maxNumIterations=200,
             residualThreshold=1e-5,
         )

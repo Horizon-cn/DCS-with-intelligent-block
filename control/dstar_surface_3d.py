@@ -675,6 +675,17 @@ class DStarLiteSurface3D:
         p1 = self.node_to_face_midpoint(next_node)
         return self._spherical_shell_path(c, p0, p1)
 
+    def transition_spatial_path_from_point_via_current_center(
+        self,
+        start_point: Tuple[float, float, float],
+        cur_node: Node,
+        next_node: Node,
+    ) -> Optional[List[Tuple[float, float, float]]]:
+        """Return one feasible spatial path from a current contact point to next around cur face midpoint."""
+        c = self.node_to_face_midpoint(cur_node)
+        p1 = self.node_to_face_midpoint(next_node)
+        return self._spherical_shell_path(c, start_point, p1)
+
     def _transition_reachable_via_current_center(self, prev_node: Node, cur_node: Node, next_node: Node) -> bool:
         """
         Check whether a collision-free trajectory exists from prev_node to next_node
