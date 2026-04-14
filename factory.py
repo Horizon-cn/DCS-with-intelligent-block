@@ -475,7 +475,7 @@ class rob_info:
             fixed_end_pos,
             fixed_end_orn,
             **ik_kwargs,
-            maxNumIterations=200,
+            maxNumIterations=500,
             residualThreshold=1e-5,
         )
         p.resetBasePositionAndOrientation(self.robot_id, base_pos, base_orn)

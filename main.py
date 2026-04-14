@@ -117,7 +117,7 @@ def main() -> None:
     
     while True:
         start, goal = random.sample(valid_nodes, 2)
-        if start.pos != goal.pos:
+        if start.pos != goal.pos and start.face_dir == "-Z":
             break
     print(f"Randomly sampled start node: pos={start.pos}, face_dir={start.face_dir}")   
 
