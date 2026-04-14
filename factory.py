@@ -194,10 +194,6 @@ class rob_info:
             return (0.0, 0.0, 0.0)
         return (v[0] / n, v[1] / n, v[2] / n)
 
-    def _project_to_plane(self, v, n):
-        dn = self._dot(v, n)
-        return (v[0] - dn * n[0], v[1] - dn * n[1], v[2] - dn * n[2])
-
     def _quat_from_axes(self, x_axis, y_axis, z_axis):
         r00, r01, r02 = x_axis[0], y_axis[0], z_axis[0]
         r10, r11, r12 = x_axis[1], y_axis[1], z_axis[1]
@@ -284,6 +280,23 @@ class rob_info:
             float(contact_point[1]) + z_axis[1] * center_offset,
             float(contact_point[2]) + z_axis[2] * center_offset,
         )
+
+    def platform_contact_point(self, platform_name: str):
+        """Return the current world-space contact point of the named platform."""
+        link_id = self._platform_link(platform_name)
+        link_pos, link_orn = self._link_pose(link_id)
+        rot = p.getMatrixFromQuaternion(link_orn)
+        z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
+        contact_offset = self._platform_contact_sign(platform_name) * self.PLATFORM_HALF_THICKNESS
+        return (
+            float(link_pos[0]) + z_axis[0] * contact_offset,
+            float(link_pos[1]) + z_axis[1] * contact_offset,
+            float(link_pos[2]) + z_axis[2] * contact_offset,
+        )
+
+    def current_moving_platform_contact_point(self):
+        """Return the current contact point of the platform that will move next."""
+        return self.platform_contact_point(self._other_platform(self.fixed_platform))
 
     def _create_anchor(self, pos, orn) -> int:
         col = p.createCollisionShape(p.GEOM_SPHERE, radius=1e-3)
@@ -402,7 +415,7 @@ class rob_info:
 
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
-        dt = 1/480
+        dt = 1/960
         max_force = 1000000
         pos_tol = 0.005
         orn_tol = 0.035

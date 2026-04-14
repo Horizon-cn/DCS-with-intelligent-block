@@ -505,6 +505,16 @@ class DynamicMoveToTargetTask:
                             from_node,
                             to_node,
                         )
+                    elif (
+                        prev_node is None
+                        and hasattr(self.rob, "current_moving_platform_contact_point")
+                        and hasattr(self.planner, "transition_spatial_path_from_point_via_current_center")
+                    ):
+                        spatial_path = self.planner.transition_spatial_path_from_point_via_current_center(
+                            self.rob.current_moving_platform_contact_point(),
+                            from_node,
+                            to_node,
+                        )
                     self.rob.step_forward(from_node, to_node, prev_node=prev_node, spatial_path=spatial_path)
                     self.current_i += 1
                     continue
