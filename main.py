@@ -172,9 +172,17 @@ def main() -> None:
     #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
     # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
-    planner = DStarLiteSurface3D(occ, (X, Y, Z), start, goal)
+    planner = DStarLiteSurface3D(
+        occ,
+        (X, Y, Z),
+        start,
+        goal,
+        start_heading_dir=robots_info[0].planner_start_heading_dir(start),
+        start_fixed_platform=robots_info[0].fixed_platform,
+    )
     planner.plan_from_current()  # Initialize planning
-    path = planner.extract_path_stateless(max_steps=100)
+    path = planner.extract_oriented_path_stateless(max_steps=100)
+    planner.print_path_nodes(path)
     planner.plot_3d_voxels_and_path(path)
 
     p.resetBasePositionAndOrientation(robot2_id, start_base_pos, start_base_orn)

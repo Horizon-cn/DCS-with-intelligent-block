@@ -7,7 +7,7 @@ import pybullet as p
 from config_loader import load_config
 from control.move import goto, move_base_dir, move_base_tar
 from control.plan import Grid, motionplan
-from control.dstar_surface_3d import DStarLiteSurface3D, Node as SurfaceNode, NORM, FACES
+from control.dstar_surface_3d import DStarLiteSurface3D, Node as SurfaceNode, OrientedNode, NORM, FACES
 from python_motion_planning.common import *
 
 cfg = load_config()
@@ -268,7 +268,7 @@ class DynamicMoveToTargetTask:
         
         # D* Lite planner (initialized in setup())
         self.planner = None
-        self.path = []
+        self.path: list[OrientedNode] = []
         self.current_i = 0
         self.reached = False
         self.cruise_z = 0
@@ -320,8 +320,22 @@ class DynamicMoveToTargetTask:
         
         # Initialize D* Lite planner
         try:
-            self.planner = DStarLiteSurface3D(self.occ, self.size_xyz, start_node, goal_node)
-            self.path = self.planner.plan(max_steps=100)
+            start_heading_dir = None
+            start_fixed_platform = "base_platform"
+            if hasattr(robot, "planner_start_heading_dir") and callable(robot.planner_start_heading_dir):
+                start_heading_dir = robot.planner_start_heading_dir(start_node)
+            if hasattr(robot, "fixed_platform"):
+                start_fixed_platform = robot.fixed_platform
+
+            self.planner = DStarLiteSurface3D(
+                self.occ,
+                self.size_xyz,
+                start_node,
+                goal_node,
+                start_heading_dir=start_heading_dir,
+                start_fixed_platform=start_fixed_platform,
+            )
+            self.path = self.planner.plan_oriented(max_steps=100)
             
             if not self.path:
                 print(f"Warning: No path found from {start_node} to {goal_node}")
@@ -472,7 +486,19 @@ class DynamicMoveToTargetTask:
                             continue
 
                         try:
-                            self.planner.move_start_to(cur_node)
+                            current_heading_dir = (
+                                self.rob.planner_start_heading_dir(cur_node)
+                                if hasattr(self.rob, "planner_start_heading_dir")
+                                else self.planner.start.heading_dir
+                            )
+                            current_fixed_platform = (
+                                self.rob.fixed_platform
+                                if hasattr(self.rob, "fixed_platform")
+                                else self.planner.start.fixed_platform
+                            )
+                            self.planner.move_start_to(
+                                OrientedNode(cur_node, current_heading_dir, current_fixed_platform)
+                            )
                         except Exception as e:
                             print(f"Failed to move planner start to current node: {e}")
                             self.reached = True
@@ -495,18 +521,20 @@ class DynamicMoveToTargetTask:
                         self.reached = True
                         break
 
-                    prev_node = self.path[self.current_i - 1] if self.current_i > 0 else None
-                    from_node = self.path[self.current_i]
-                    to_node = self.path[self.current_i + 1]
+                    prev_state = self.path[self.current_i - 1] if self.current_i > 0 else None
+                    from_state = self.path[self.current_i]
+                    to_state = self.path[self.current_i + 1]
+                    from_node = from_state.node
+                    to_node = to_state.node
                     spatial_path = None
-                    if prev_node is not None and hasattr(self.planner, "transition_spatial_path_via_current_center"):
+                    if prev_state is not None and hasattr(self.planner, "transition_spatial_path_via_current_center"):
                         spatial_path = self.planner.transition_spatial_path_via_current_center(
-                            prev_node,
+                            prev_state.node,
                             from_node,
                             to_node,
                         )
                     elif (
-                        prev_node is None
+                        prev_state is None
                         and hasattr(self.rob, "current_moving_platform_contact_point")
                         and hasattr(self.planner, "transition_spatial_path_from_point_via_current_center")
                     ):
@@ -533,11 +561,18 @@ class DynamicMoveToTargetTask:
                                 )
                                 if alt_path and len(alt_path) > len(spatial_path or []):
                                     spatial_path = alt_path
-                    self.rob.step_forward(from_node, to_node, prev_node=prev_node, spatial_path=spatial_path)
+                    self.rob.step_forward(
+                        from_node,
+                        to_node,
+                        prev_node=prev_state.node if prev_state is not None else None,
+                        spatial_path=spatial_path,
+                        target_heading_dir=to_state.heading_dir,
+                        target_fixed_platform=to_state.fixed_platform,
+                    )
                     self.current_i += 1
                     continue
 
-                waypoint = self.path[self.current_i].pos
+                waypoint = self.path[self.current_i].node.pos
                 target_3d = [waypoint[0] + 0.5, waypoint[1] + 0.5, waypoint[2]]
 
                 # Advance index only when current path point is reached.
@@ -567,7 +602,7 @@ class DynamicMoveToTargetTask:
 
         return
     
-    def _extract_path_from_planner(self) -> list[SurfaceNode]:
+    def _extract_path_from_planner(self) -> list[OrientedNode]:
         """
         Extract path from D* Lite planner using stateless method.
         Does NOT modify planner's internal state (start position, km).
@@ -576,7 +611,7 @@ class DynamicMoveToTargetTask:
             return []
         
         # Use stateless path extraction to avoid modifying planner state
-        path = self.planner.extract_path_stateless(max_steps=200)
+        path = self.planner.extract_oriented_path_stateless(max_steps=200)
         return path
 
 

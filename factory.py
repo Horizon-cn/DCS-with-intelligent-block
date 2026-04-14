@@ -128,6 +128,9 @@ class rob_info:
     # Cached platform orientations (world frame quaternions).
     base_platform_orientation: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     end_platform_orientation: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    base_platform_heading_dir: str = "+X"
+    end_platform_heading_dir: str = "+X"
+    fixed_heading_dir: str = "+X"
     fixed_cid: int | None = None
     moving_cid: int | None = None
     fixed_anchor_id: int | None = None
@@ -159,6 +162,9 @@ class rob_info:
                 f"Failed to get link state for end_platform link index {self.END_PLATFORM_LINK}"
             )
         self.end_platform_orientation = end_state[1]
+        self.base_platform_heading_dir = self._heading_dir_from_orientation(self.base_platform_orientation)
+        self.end_platform_heading_dir = self._heading_dir_from_orientation(self.end_platform_orientation)
+        self.fixed_heading_dir = self.base_platform_heading_dir
 
     def _platform_link(self, name: str) -> int:
         return self.BASE_PLATFORM_LINK if name == "base_platform" else self.END_PLATFORM_LINK
@@ -193,6 +199,34 @@ class rob_info:
         if n < eps:
             return (0.0, 0.0, 0.0)
         return (v[0] / n, v[1] / n, v[2] / n)
+
+    def _closest_axis_label(self, v, allowed: tuple[str, ...] | None = None) -> str:
+        allowed_labels = allowed if allowed is not None else tuple(self.FACE_NORM.keys())
+        best_label = allowed_labels[0]
+        best_dot = -1e9
+        for label in allowed_labels:
+            axis = self.FACE_NORM[label]
+            dot = self._dot(v, axis)
+            if dot > best_dot:
+                best_dot = dot
+                best_label = label
+        return best_label
+
+    def _heading_dir_from_orientation(self, orn, allowed: tuple[str, ...] | None = None) -> str:
+        rot = p.getMatrixFromQuaternion(orn)
+        x_axis = (rot[0], rot[3], rot[6])  # local +X in world
+        return self._closest_axis_label(x_axis, allowed=allowed)
+
+    def planner_start_heading_dir(self, node) -> str:
+        tangent_axes = tuple(
+            label for label, axis in self.FACE_NORM.items() if abs(self._dot(axis, self.FACE_NORM[node.face_dir])) < 1e-9
+        )
+        platform_orn = (
+            self.base_platform_orientation
+            if self.fixed_platform == "base_platform"
+            else self.end_platform_orientation
+        )
+        return self._heading_dir_from_orientation(platform_orn, allowed=tangent_axes)
 
     def _quat_from_axes(self, x_axis, y_axis, z_axis):
         r00, r01, r02 = x_axis[0], y_axis[0], z_axis[0]
@@ -230,21 +264,25 @@ class rob_info:
         # base_platform contacts with local -Z; end_platform contacts with local +Z.
         return -1.0 if platform_name == "base_platform" else 1.0
 
-    def _platform_orientation_for_face(self, face_dir: str, platform_name: str):
-        """World-frame quaternion with the platform contact side pointing at face_dir."""
+    def _platform_orientation_for_face(self, face_dir: str, platform_name: str, heading_dir: str | None = None):
+        """World-frame quaternion with platform contact side on face_dir and +X on heading_dir."""
         n = self.FACE_NORM[face_dir]
-
-        # Deterministic tangent axes for each exposed face. The platform's local
-        # contact side points toward n; base and end use opposite local Z sides.
-        if face_dir in ("+Z", "-Z"):
-            x_axis = (1.0, 0.0, 0.0)
-        elif face_dir in ("+X", "-X"):
-            x_axis = (0.0, 1.0, 0.0)
-        else:
-            x_axis = (1.0, 0.0, 0.0)
-
         contact_sign = self._platform_contact_sign(platform_name)
         z_axis = (n[0] / contact_sign, n[1] / contact_sign, n[2] / contact_sign)
+        if heading_dir is None:
+            if face_dir in ("+Z", "-Z"):
+                x_axis = (1.0, 0.0, 0.0)
+            elif face_dir in ("+X", "-X"):
+                x_axis = (0.0, 1.0, 0.0)
+            else:
+                x_axis = (1.0, 0.0, 0.0)
+        else:
+            x_axis = self.FACE_NORM[heading_dir]
+            if abs(self._dot(x_axis, z_axis)) > 1e-9:
+                raise ValueError(
+                    f"Heading {heading_dir} is not tangent to face {face_dir} for platform {platform_name}"
+                )
+
         y_axis = self._normalize(self._cross(z_axis, x_axis))
         x_axis = self._normalize(self._cross(y_axis, z_axis))
         return self._quat_from_axes(x_axis, y_axis, z_axis)
@@ -280,6 +318,50 @@ class rob_info:
             float(contact_point[1]) + z_axis[1] * center_offset,
             float(contact_point[2]) + z_axis[2] * center_offset,
         )
+
+    def _resample_polyline_waypoints(self, points, waypoint_count: int = 8):
+        """Resample a polyline to a fixed number of waypoints, including endpoints."""
+        pts = [tuple(float(v) for v in pt) for pt in points]
+        if len(pts) <= 1 or waypoint_count <= 1:
+            return pts
+
+        seg_lengths = []
+        total_len = 0.0
+        for i in range(len(pts) - 1):
+            dx = pts[i + 1][0] - pts[i][0]
+            dy = pts[i + 1][1] - pts[i][1]
+            dz = pts[i + 1][2] - pts[i][2]
+            seg_len = math.sqrt(dx * dx + dy * dy + dz * dz)
+            seg_lengths.append(seg_len)
+            total_len += seg_len
+
+        if total_len < 1e-9:
+            return [pts[0]] * waypoint_count
+
+        targets = [total_len * i / (waypoint_count - 1) for i in range(waypoint_count)]
+        out = [pts[0]]
+        seg_idx = 0
+        traversed = 0.0
+
+        for target_dist in targets[1:-1]:
+            while seg_idx < len(seg_lengths) - 1 and traversed + seg_lengths[seg_idx] < target_dist:
+                traversed += seg_lengths[seg_idx]
+                seg_idx += 1
+
+            seg_len = max(seg_lengths[seg_idx], 1e-9)
+            t = (target_dist - traversed) / seg_len
+            p0 = pts[seg_idx]
+            p1 = pts[seg_idx + 1]
+            out.append(
+                (
+                    p0[0] + (p1[0] - p0[0]) * t,
+                    p0[1] + (p1[1] - p0[1]) * t,
+                    p0[2] + (p1[2] - p0[2]) * t,
+                )
+            )
+
+        out.append(pts[-1])
+        return out
 
     def platform_contact_point(self, platform_name: str):
         """Return the current world-space contact point of the named platform."""
@@ -482,8 +564,19 @@ class rob_info:
             if pos_err <= pos_tol and orn_err <= orn_tol and joint_err <= joint_tol:
                 break
 
-    def _compute_target_orientation(self, from_node, to_node, fixed_platform_pos, moving_platform_name: str):
-        return self._platform_orientation_for_face(to_node.face_dir, moving_platform_name)
+    def _compute_target_orientation(
+        self,
+        from_node,
+        to_node,
+        fixed_platform_pos,
+        moving_platform_name: str,
+        target_heading_dir: str | None = None,
+    ):
+        return self._platform_orientation_for_face(
+            to_node.face_dir,
+            moving_platform_name,
+            heading_dir=target_heading_dir,
+        )
 
     def glue_to_cube(self, cube_id: int) -> None:
         self.glue_cid = try_glue(self.robot_id, cube_id)
@@ -517,7 +610,15 @@ class rob_info:
         task.setup(target_pos, self.robot_id)
         task.begin(self.robot_id)
 
-    def step_forward(self, from_node, to_node, prev_node=None, spatial_path=None) -> None:
+    def step_forward(
+        self,
+        from_node,
+        to_node,
+        prev_node=None,
+        spatial_path=None,
+        target_heading_dir: str | None = None,
+        target_fixed_platform: str | None = None,
+    ) -> None:
         """
         Move one step on 3D path with dual-platform locking semantics.
         - First step defaults to fixed base platform.
@@ -543,36 +644,22 @@ class rob_info:
         self.fixed_anchor_id = self._create_anchor(fixed_contact_pos, fixed_orn)
         self.fixed_cid = self._create_lock_to_anchor(fixed_link, self.fixed_anchor_id)
 
-        target_moving_orn = self._compute_target_orientation(from_node, to_node, fixed_contact_pos, moving_name)
+        target_moving_orn = self._compute_target_orientation(
+            from_node,
+            to_node,
+            fixed_contact_pos,
+            moving_name,
+            target_heading_dir=target_heading_dir,
+        )
         target_moving_pos = self._platform_center_for_node_contact(to_node, target_moving_orn, moving_name)
         print(f"Moving {moving_name} from {fixed_name} contact at {fixed_contact_pos} to target node at {to_node.pos} with orientation {target_moving_orn}")
 
         # If planner provides a feasible shell/surface path, follow intermediate
         # contact waypoints to reduce large IK jumps.
         if spatial_path and len(spatial_path) > 2:
-            print(f"Following spatial path with {len(spatial_path)} waypoints for smoother motion")
-            path_points = [tuple(float(v) for v in pt) for pt in spatial_path]
+            path_points = self._resample_polyline_waypoints(spatial_path, waypoint_count=8)
+            print(f"Following spatial path with {len(path_points)} waypoints for smoother motion")
             inner_points = path_points[1:-1]
-
-            total_len = 0.0
-            for i in range(len(path_points) - 1):
-                dx = path_points[i + 1][0] - path_points[i][0]
-                dy = path_points[i + 1][1] - path_points[i][1]
-                dz = path_points[i + 1][2] - path_points[i][2]
-                total_len += math.sqrt(dx * dx + dy * dy + dz * dz)
-
-            target_spacing = 0.12
-            min_inner = 6
-            max_inner_cap = 24
-            adaptive_max_inner = max(
-                min_inner,
-                min(max_inner_cap, int(math.ceil(total_len / target_spacing)) - 1),
-            )
-
-            max_inner = adaptive_max_inner
-            if len(inner_points) > max_inner:
-                stride = max(1, int(math.ceil(len(inner_points) / max_inner)))
-                inner_points = inner_points[::stride]
 
             for contact_pt in inner_points:
                 waypoint_pos = self._platform_center_from_contact_point(
@@ -623,6 +710,24 @@ class rob_info:
         end_pos, end_orn = self._link_pose(self.END_PLATFORM_LINK)
         self.base_platform_orientation = base_orn
         self.end_platform_orientation = end_orn
+        self.base_platform_heading_dir = self._heading_dir_from_orientation(base_orn)
+        self.end_platform_heading_dir = self._heading_dir_from_orientation(end_orn)
 
         # Next step swaps fixed platform (new support platform is the one just moved).
         self.fixed_platform = moving_name
+        if target_heading_dir is not None:
+            self.fixed_heading_dir = target_heading_dir
+            if moving_name == "base_platform":
+                self.base_platform_heading_dir = target_heading_dir
+            else:
+                self.end_platform_heading_dir = target_heading_dir
+        else:
+            self.fixed_heading_dir = (
+                self.base_platform_heading_dir
+                if self.fixed_platform == "base_platform"
+                else self.end_platform_heading_dir
+            )
+        if target_fixed_platform is not None and target_fixed_platform != self.fixed_platform:
+            raise ValueError(
+                f"Planner/execution fixed platform mismatch: expected {target_fixed_platform}, got {self.fixed_platform}"
+            )

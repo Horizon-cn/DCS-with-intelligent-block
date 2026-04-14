@@ -38,6 +38,14 @@ class Node:
     face_dir: str
 
 
+@dataclass(frozen=True)
+class OrientedNode:
+    """Surface node plus the current support platform's forward heading."""
+    node: Node
+    heading_dir: str
+    fixed_platform: str
+
+
 class LazyPQ:
     """Priority queue with lazy deletion via key re-checking."""
     def __init__(self):
@@ -71,7 +79,18 @@ class LazyPQ:
 
 
 class DStarLiteSurface3D:
-    def __init__(self, occ, size_xyz: Tuple[int, int, int], start: Node, goal: Node):
+    PLATFORM_NAMES = ("base_platform", "end_platform")
+    PLATFORM_CONTACT_SIGN = {"base_platform": -1.0, "end_platform": 1.0}
+
+    def __init__(
+        self,
+        occ,
+        size_xyz: Tuple[int, int, int],
+        start: Node,
+        goal: Node,
+        start_heading_dir: Optional[str] = None,
+        start_fixed_platform: str = "base_platform",
+    ):
         """
         occ: 3D occupancy container supporting occ[x,y,z] -> 0/1 (free/blocked)
              e.g. numpy array with shape (X,Y,Z) or dict-like with __getitem__
@@ -81,8 +100,8 @@ class DStarLiteSurface3D:
         self.occ = occ
         self.X, self.Y, self.Z = size_xyz
         self.visited_faces: Set[Node] = set()
-        self.start = start
-        self.goal = goal
+        self.start_node = start
+        self.goal_node = goal
         # Save original start/goal for visualization (since self.start gets modified during planning)
         self.start_orig = start
         self.goal_orig = goal
@@ -92,20 +111,35 @@ class DStarLiteSurface3D:
         if not self.valid_node(goal):
             raise ValueError(f"goal {goal} is not a valid exposed obstacle face node.")
 
-        self.g: Dict[Node, int] = {}
-        self.rhs: Dict[Node, int] = {}
+        if start_fixed_platform not in self.PLATFORM_NAMES:
+            raise ValueError(f"Unsupported start_fixed_platform {start_fixed_platform!r}")
+
+        if start_heading_dir is None:
+            start_heading_dir = self._default_heading_dir_for_face(start.face_dir)
+
+        self.start = OrientedNode(start, start_heading_dir, start_fixed_platform)
+        self.goal_states = self._goal_states_for_node(goal)
+
+        if not self.valid_state(self.start):
+            raise ValueError(f"start state {self.start} is not valid.")
+
+        self.g: Dict[OrientedNode, int] = {}
+        self.rhs: Dict[OrientedNode, int] = {}
         self.OPEN = LazyPQ()
         self.km = 0
 
-        self.rhs[self.goal] = 0
-        self.g[self.goal] = INF
-        self.OPEN.push(self.key(self.goal), self.goal)
-        start_mid = self.node_to_face_midpoint(self.start)
-        goal_mid = self.node_to_face_midpoint(self.goal)
+        for goal_state in self.goal_states:
+            self.rhs[goal_state] = 0
+            self.g[goal_state] = INF
+            self.OPEN.push(self.key(goal_state), goal_state)
+
+        start_mid = self.node_to_face_midpoint(self.start.node)
+        goal_mid = self.node_to_face_midpoint(self.goal_node)
         print(
             "Initialized D* Lite with "
-            f"start(center={self.start.pos}, face={self.start.face_dir}, face_mid={start_mid}) "
-            f"and goal(center={self.goal.pos}, face={self.goal.face_dir}, face_mid={goal_mid})"
+            f"start(center={self.start.node.pos}, face={self.start.node.face_dir}, heading={self.start.heading_dir}, "
+            f"fixed={self.start.fixed_platform}, face_mid={start_mid}) "
+            f"and goal(center={self.goal_node.pos}, face={self.goal_node.face_dir}, face_mid={goal_mid})"
         )
         
         # --- batch update mechanism ---
@@ -138,6 +172,56 @@ class DStarLiteSurface3D:
             node.pos[1] + 0.5 * n[1],
             node.pos[2] + 0.5 * n[2],
         )
+
+    def _default_heading_dir_for_face(self, face_dir: str) -> str:
+        if face_dir in ("+Z", "-Z"):
+            return "+X"
+        if face_dir in ("+X", "-X"):
+            return "+Y"
+        return "+X"
+
+    def _goal_states_for_node(self, node: Node) -> Set[OrientedNode]:
+        return {
+            OrientedNode(node, heading_dir, fixed_platform)
+            for fixed_platform in self.PLATFORM_NAMES
+            for heading_dir in self._tangent_heading_dirs(node.face_dir)
+        }
+
+    def _axis_label_from_vec(self, v: Tuple[float, float, float]) -> str:
+        for label, axis in NORM.items():
+            if axis == (int(round(v[0])), int(round(v[1])), int(round(v[2]))):
+                return label
+        raise ValueError(f"Vector {v} is not axis-aligned")
+
+    def _opposite_axis(self, axis_label: str) -> str:
+        return OPPOSITE_FACE[axis_label]
+
+    def _tangent_heading_dirs(self, face_dir: str) -> List[str]:
+        normal = NORM[face_dir]
+        return [axis for axis in FACES if self._dot3(NORM[axis], normal) == 0]
+
+    def _state_contact_z_axis(self, state: OrientedNode) -> Tuple[float, float, float]:
+        contact_sign = self.PLATFORM_CONTACT_SIGN[state.fixed_platform]
+        normal = NORM[state.node.face_dir]
+        return (
+            normal[0] / contact_sign,
+            normal[1] / contact_sign,
+            normal[2] / contact_sign,
+        )
+
+    def _state_left_axis(self, state: OrientedNode) -> Tuple[float, float, float]:
+        z_axis = self._state_contact_z_axis(state)
+        x_axis = NORM[state.heading_dir]
+        return self._cross3(z_axis, x_axis)
+
+    def valid_state(self, state: OrientedNode) -> bool:
+        if state.fixed_platform not in self.PLATFORM_NAMES:
+            return False
+        if not self.valid_node(state.node):
+            return False
+        if state.heading_dir not in FACES:
+            return False
+        return self._dot3(NORM[state.heading_dir], NORM[state.node.face_dir]) == 0
 
     def _norm3(self, v: Tuple[float, float, float]) -> float:
         return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
@@ -718,11 +802,12 @@ class DStarLiteSurface3D:
         return self.in_bounds(obs_v) and self.occ_at(obs_v) == 1
 
     # --- heuristic (safe lower bound) ---
-    def h(self, a: Node, b: Node) -> int:
-        va, vb = self.center_to_idx(a.pos), self.center_to_idx(b.pos)
+    def h(self, a: OrientedNode, b: OrientedNode) -> int:
+        va = self.center_to_idx(a.node.pos)
+        vb = self.center_to_idx(b.node.pos)
         return abs(va[0]-vb[0]) + abs(va[1]-vb[1]) + abs(va[2]-vb[2])
 
-    def key(self, s: Node):
+    def key(self, s: OrientedNode):
         gs = self.g.get(s, INF)
         rs = self.rhs.get(s, INF)
         m = min(gs, rs)
@@ -766,8 +851,8 @@ class DStarLiteSurface3D:
         proj_dist = math.sqrt(tang[0] * tang[0] + tang[1] * tang[1] + tang[2] * tang[2])
         return 0.0 < proj_dist < 2.0
 
-    # --- successors on the surface graph ---
-    def successors(self, node: Node) -> List[Node]:
+    # --- surface-graph neighbors ignoring heading/platform state ---
+    def _surface_successor_nodes(self, node: Node) -> List[Node]:
         if not self.valid_node(node):
             return []
 
@@ -830,19 +915,90 @@ class DStarLiteSurface3D:
                 dedup.append(s)
         return dedup
 
-    def cost(self, a: Node, b: Node) -> int:
+    def _classify_relative_parallel_move(
+        self,
+        state: OrientedNode,
+        next_node: Node,
+        eps: float = 1e-6,
+    ) -> Optional[str]:
+        d0 = self.node_to_face_midpoint(state.node)
+        d1 = self.node_to_face_midpoint(next_node)
+        delta = (d1[0] - d0[0], d1[1] - d0[1], d1[2] - d0[2])
+
+        forward = NORM[state.heading_dir]
+        left = self._state_left_axis(state)
+        f_proj = self._dot3(delta, forward)
+        l_proj = self._dot3(delta, left)
+
+        if f_proj < -eps:
+            return None
+        if f_proj > eps and abs(l_proj) <= eps:
+            return "front"
+        if abs(f_proj) <= eps and l_proj > eps:
+            return "left"
+        if abs(f_proj) <= eps and l_proj < -eps:
+            return "right"
+        if f_proj > eps and l_proj > eps:
+            return "front_left"
+        if f_proj > eps and l_proj < -eps:
+            return "front_right"
+        return None
+
+    def _allowed_next_headings(self, state: OrientedNode, next_node: Node) -> List[str]:
+        current_normal = NORM[state.node.face_dir]
+        next_normal = NORM[next_node.face_dir]
+        dot_normals = self._dot3(current_normal, next_normal)
+
+        allowed = set(self._tangent_heading_dirs(next_node.face_dir))
+        current_forward = state.heading_dir
+        current_left = self._axis_label_from_vec(self._state_left_axis(state))
+        current_right = self._opposite_axis(current_left)
+        current_down = self._opposite_axis(self._axis_label_from_vec(self._state_contact_z_axis(state)))
+
+        if dot_normals == 0:
+            allowed.discard(current_down)
+        else:
+            relation = self._classify_relative_parallel_move(state, next_node)
+            if relation is None:
+                return []
+            forbidden = {
+                "front": {current_forward},
+                "left": {current_left},
+                "right": {current_right},
+                "front_left": {current_forward, current_left},
+                "front_right": {current_forward, current_right},
+            }.get(relation, set())
+            allowed.difference_update(forbidden)
+
+        return [heading for heading in self._tangent_heading_dirs(next_node.face_dir) if heading in allowed]
+
+    # --- successors on the oriented surface graph ---
+    def successors(self, state: OrientedNode) -> List[OrientedNode]:
+        if not self.valid_state(state):
+            return []
+
+        out: List[OrientedNode] = []
+        next_fixed_platform = (
+            "end_platform" if state.fixed_platform == "base_platform" else "base_platform"
+        )
+        for next_node in self._surface_successor_nodes(state.node):
+            for heading_dir in self._allowed_next_headings(state, next_node):
+                out.append(OrientedNode(next_node, heading_dir, next_fixed_platform))
+        return out
+
+    def cost(self, a: OrientedNode, b: OrientedNode) -> int:
         # all moves cost 1 (your requirement)
         # If b is invalid, treat as blocked
-        if not self.valid_node(b):
+        if not self.valid_state(b):
             return INF
         # Disallow switching faces at the same free-voxel center.
-        if a.pos == b.pos:
+        if a.node.pos == b.node.pos:
             return INF
         return 1
 
     # --- D* Lite core routines ---
-    def update_vertex(self, u: Node):
-        if u != self.goal:
+    def update_vertex(self, u: OrientedNode):
+        if u not in self.goal_states:
             best = INF
             for s in self.successors(u):
                 c = self.cost(u, s)
@@ -890,14 +1046,14 @@ class DStarLiteSurface3D:
                     #print(f"gu < ru: Updating predecessor {p} of {u}")
                     self.update_vertex(p)
 
-    def local_predecessors(self, node: Node) -> List[Node]:
+    def local_predecessors(self, state: OrientedNode) -> List[OrientedNode]:
         """
         Exact predecessors would require reverse edges on the surface graph.
         Practical approach for voxel surface graph: update a local candidate set.
         Since updates are 'occasional', local scanning is acceptable.
         """
-        v = self.center_to_idx(node.pos)
-        cand: List[Node] = []
+        v = self.center_to_idx(state.node.pos)
+        cand: List[OrientedNode] = []
 
         # Search a local 3x3x3 free-voxel neighborhood to capture slide + edge-flip predecessors.
         for dx in (-1, 0, 1):
@@ -907,23 +1063,37 @@ class DStarLiteSurface3D:
                     if not self.in_bounds(v2) or self.occ_at(v2) != 0:
                         continue
                     for f2 in self.available_face_dirs(v2):
-                        c = Node(self.idx_to_center(v2), f2)
-                        if self.valid_node(c):
-                            cand.append(c)
+                        node2 = Node(self.idx_to_center(v2), f2)
+                        if not self.valid_node(node2):
+                            continue
+                        for heading_dir in self._tangent_heading_dirs(f2):
+                            for fixed_platform in self.PLATFORM_NAMES:
+                                cand.append(OrientedNode(node2, heading_dir, fixed_platform))
 
         # Keep only true predecessors according to current successor model.
-        out = [c for c in cand if node in self.successors(c)]
+        out = [c for c in cand if state in self.successors(c)]
         return list(dict.fromkeys(out))
 
-    def _best_successor(self, node: Node, prev_node: Optional[Node] = None) -> Optional[Node]:
+    def _best_successor(
+        self,
+        state: OrientedNode,
+        prev_state: Optional[OrientedNode] = None,
+    ) -> Optional[OrientedNode]:
         best = INF
         best_s = None
-        for successor in self.successors(node):
-            if successor.pos == node.pos:
+        for successor in self.successors(state):
+            if successor.node.pos == state.node.pos:
                 continue
-            if prev_node is not None and not self._transition_reachable_via_current_center(prev_node, node, successor):
+            if (
+                prev_state is not None
+                and not self._transition_reachable_via_current_center(
+                    prev_state.node,
+                    state.node,
+                    successor.node,
+                )
+            ):
                 continue
-            value = self.cost(node, successor) + self.g.get(successor, INF)
+            value = self.cost(state, successor) + self.g.get(successor, INF)
             if value < best:
                 best = value
                 best_s = successor
@@ -940,25 +1110,51 @@ class DStarLiteSurface3D:
         return affected
 
     def _update_affected_nodes(self, voxels) -> None:
-        affected_nodes: Set[Node] = set()
+        affected_nodes: Set[OrientedNode] = set()
         for voxel in self._affected_free_voxels(voxels):
             if self.occ_at(voxel) != 0:
                 continue
-            affected_nodes.update(self._candidate_face_nodes(voxel))
+            for node in self._candidate_face_nodes(voxel):
+                for heading_dir in self._tangent_heading_dirs(node.face_dir):
+                    for fixed_platform in self.PLATFORM_NAMES:
+                        affected_nodes.add(OrientedNode(node, heading_dir, fixed_platform))
 
-        for node in affected_nodes:
-            if self.valid_node(node):
-                self.update_vertex(node)
+        for state in affected_nodes:
+            if self.valid_state(state):
+                self.update_vertex(state)
             else:
-                self.rhs[node] = INF
-                self.g[node] = INF
-                self.update_vertex(node)
+                self.rhs[state] = INF
+                self.g[state] = INF
+                self.update_vertex(state)
 
     # --- usage helpers ---
     def plan_from_current(self) -> bool:
         """Run/repair plan for current start; returns True if reachable."""
         self.compute_shortest_path()
         return self.g.get(self.start, INF) < INF
+
+    def extract_oriented_path_stateless(self, max_steps: int = 1000) -> List[OrientedNode]:
+        path: List[OrientedNode] = []
+        if self.g.get(self.start, INF) >= INF:
+            return path
+
+        current = self.start
+        prev: Optional[OrientedNode] = None
+        path.append(current)
+
+        for _ in range(max_steps):
+            if current in self.goal_states:
+                break
+
+            best_s = self._best_successor(current, prev_state=prev)
+            if best_s is None:
+                break
+
+            prev = current
+            current = best_s
+            path.append(current)
+
+        return path
 
     def extract_path_stateless(self, max_steps: int = 1000) -> List[Node]:
         """
@@ -967,41 +1163,21 @@ class DStarLiteSurface3D:
         
         Returns path by tracing greedy policy from g-values.
         """
-        path: List[Node] = []
-        if self.g.get(self.start, INF) >= INF:
-            return path
-        
-        current = self.start
-        prev: Optional[Node] = None
-        path.append(current)
-        
-        for _ in range(max_steps):
-            if current == self.goal:
-                break
-
-            best_s = self._best_successor(current, prev_node=prev)
-            if best_s is None:
-                break
-
-            prev = current
-            current = best_s
-            path.append(current)
-        
-        return path
+        return [state.node for state in self.extract_oriented_path_stateless(max_steps=max_steps)]
     
-    def plan(self, max_steps: int = 1000) -> List[Node]:
+    def plan_oriented(self, max_steps: int = 1000) -> List[OrientedNode]:
         """Plan from current start to goal and return PATH NODES list."""
-        path: List[Node] = []
+        path: List[OrientedNode] = []
         if not self.plan_from_current():
             return path
 
         path.append(self.start)
-        prev: Optional[Node] = None
+        prev: Optional[OrientedNode] = None
         for _ in range(max_steps):
-            if self.start == self.goal:
+            if self.start in self.goal_states:
                 break
 
-            ns = self.next_step(prev_node=prev)
+            ns = self.next_step(prev_state=prev)
             if ns is None:
                 break
 
@@ -1012,23 +1188,53 @@ class DStarLiteSurface3D:
 
         return path
 
-    def print_path_nodes(self, path: List[Node]) -> None:
+    def plan(self, max_steps: int = 1000) -> List[Node]:
+        return [state.node for state in self.plan_oriented(max_steps=max_steps)]
+
+    def _path_state_iter(self, path: List[Node] | List[OrientedNode]) -> List[tuple[Node, Optional[OrientedNode]]]:
+        out: List[tuple[Node, Optional[OrientedNode]]] = []
+        for entry in path:
+            if isinstance(entry, OrientedNode):
+                out.append((entry.node, entry))
+            else:
+                out.append((entry, None))
+        return out
+
+    def print_path_nodes(self, path: List[Node] | List[OrientedNode]) -> None:
         """Print detailed path information including nodes, positions, and goal status."""
         if not path:
             print("Path is empty.")
             return
 
         print("\n--- PATH NODES (voxel, face) ---")
-        for i, n in enumerate(path):
-            print(f"{i:03d}: {n}")
+        for i, (node, state) in enumerate(self._path_state_iter(path)):
+            if state is None:
+                print(f"{i:03d}: {node}")
+            else:
+                print(
+                    f"{i:03d}: {node}, heading={state.heading_dir}, fixed_platform={state.fixed_platform}"
+                )
 
         print("\n--- PATH POINTS (face centers) ---")
-        for i, n in enumerate(path):
-            print(f"{i:03d}: {self.node_to_face_midpoint(n)}")
+        for i, (node, state) in enumerate(self._path_state_iter(path)):
+            point = self.node_to_face_midpoint(node)
+            if state is None:
+                print(f"{i:03d}: {point}")
+            else:
+                print(
+                    f"{i:03d}: {point}, heading={state.heading_dir}, fixed_platform={state.fixed_platform}"
+                )
 
-        print(f"\nTotal steps: {len(path)}, Hit goal: {self.start == self.goal}")
+        last_node = self._path_state_iter(path)[-1][0]
+        hit_goal = bool(path) and last_node == self.goal_node
+        print(f"\nTotal steps: {len(path)}, Hit goal: {hit_goal}")
 
-    def plot_3d_voxels_and_path(self, path: List[Node], title: str = "D* Lite Surface Path") -> None:
+    def plot_3d_voxels_and_path(
+        self,
+        path: List[Node] | List[OrientedNode],
+        title: str = "D* Lite Surface Path",
+        show_orientation: bool = True,
+    ) -> None:
         """Visualize 3D path on voxel grid with obstacles, path, start and goal."""
         try:
             import numpy as np
@@ -1049,14 +1255,42 @@ class DStarLiteSurface3D:
         ax.voxels(occ_np, alpha=0.5)
 
         # --- draw path as line through face midpoints ---
-        if path:
-            pts = np.array([self.node_to_face_midpoint(n) for n in path], dtype=float)
+        state_path = self._path_state_iter(path)
+
+        if state_path:
+            pts = np.array([self.node_to_face_midpoint(node) for node, _ in state_path], dtype=float)
             ax.plot(pts[:, 0], pts[:, 1], pts[:, 2])
             
             # Draw only intermediate path points (exclude start and goal)
-            if len(path) > 2:
-                pts_mid = np.array([self.node_to_face_midpoint(n) for n in path[1:-1]], dtype=float)
+            if len(state_path) > 2:
+                pts_mid = np.array(
+                    [self.node_to_face_midpoint(node) for node, _ in state_path[1:-1]],
+                    dtype=float,
+                )
                 ax.scatter(pts_mid[:, 0], pts_mid[:, 1], pts_mid[:, 2], s=20, alpha=0.6)
+
+            if show_orientation:
+                arrow_len = 0.28
+                for i, (node, state) in enumerate(state_path):
+                    if state is None:
+                        continue
+                    px, py, pz = self.node_to_face_midpoint(node)
+                    hx, hy, hz = NORM[state.heading_dir]
+                    ax.quiver(
+                        [px], [py], [pz],
+                        [hx * arrow_len], [hy * arrow_len], [hz * arrow_len],
+                        color="tab:orange",
+                        linewidth=1.5,
+                        arrow_length_ratio=0.35,
+                    )
+                    ax.text(
+                        px,
+                        py,
+                        pz + 0.08,
+                        f"{i}:{state.heading_dir}",
+                        color="tab:orange",
+                        fontsize=8,
+                    )
 
         # --- mark original start/goal at face midpoints ---
         sx, sy, sz = self.node_to_face_midpoint(self.start_orig)
@@ -1075,18 +1309,18 @@ class DStarLiteSurface3D:
 
         plt.show()
 
-    def next_step(self, prev_node: Optional[Node] = None) -> Optional[Node]:
+    def next_step(self, prev_state: Optional[OrientedNode] = None) -> Optional[OrientedNode]:
         """Greedy one-step on surface graph using g-values (like extracting policy)."""
-        return self._best_successor(self.start, prev_node=prev_node)
+        return self._best_successor(self.start, prev_state=prev_state)
 
-    def move_start_to(self, new_start: Node):
+    def move_start_to(self, new_start: OrientedNode):
         """Advance the robot along the surface."""
-        if not self.valid_node(new_start):
+        if not self.valid_state(new_start):
             raise ValueError(f"new_start {new_start} not valid.")
         old = self.start
         self.start = new_start
         self.km += self.h(old, new_start)
-        self.visited_faces.add(new_start)  # book-keeping, not required for algorithm
+        self.visited_faces.add(new_start.node)  # book-keeping, not required for algorithm
 
         self.compute_shortest_path()
 
