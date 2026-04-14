@@ -420,7 +420,7 @@ class rob_info:
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
-        max_hold_steps = 800
+        max_hold_steps = 120
 
         if active_joint is not None and active_joint not in cur:
             raise ValueError(f"active_joint {active_joint} is not a movable joint")
