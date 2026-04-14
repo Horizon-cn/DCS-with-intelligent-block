@@ -588,7 +588,7 @@ class rob_info:
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=300)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=500)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()

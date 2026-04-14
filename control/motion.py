@@ -7,7 +7,7 @@ import pybullet as p
 from config_loader import load_config
 from control.move import goto, move_base_dir, move_base_tar
 from control.plan import Grid, motionplan
-from control.dstar_surface_3d import DStarLiteSurface3D, Node, NORM, FACES
+from control.dstar_surface_3d import DStarLiteSurface3D, Node as SurfaceNode, NORM, FACES
 from python_motion_planning.common import *
 
 cfg = load_config()
@@ -297,8 +297,8 @@ class DynamicMoveToTargetTask:
         start_pos: tuple[float,float,float],
         goal_pos: tuple[float,float,float],
         robot: Any,
-        start_node: Node | None = None,
-        goal_node: Node | None = None,
+        start_node: SurfaceNode | None = None,
+        goal_node: SurfaceNode | None = None,
     ):
         """
         Initialize planner with start and goal nodes on obstacle surfaces.
@@ -330,7 +330,7 @@ class DynamicMoveToTargetTask:
             print(f"Error initializing D* Lite planner: {e}")
             self.reached = True
     
-    def _find_closest_node(self, pos: tuple[float,float,float]) -> Node | None:
+    def _find_closest_node(self, pos: tuple[float,float,float]) -> SurfaceNode | None:
         """
         Find a stable best-matching exposed-face node for a world position.
 
@@ -370,7 +370,7 @@ class DynamicMoveToTargetTask:
                 FACES.index(face),
             )
 
-        best_node: Node | None = None
+        best_node: SurfaceNode | None = None
         best_score = None
 
         # Expanding-radius search keeps it local and deterministic.
@@ -398,7 +398,7 @@ class DynamicMoveToTargetTask:
                             score = candidate_score(vx, vy, vz, face)
                             if best_score is None or score < best_score:
                                 best_score = score
-                                best_node = Node((vx + 0.5, vy + 0.5, vz + 0.5), face)
+                                best_node = SurfaceNode((vx + 0.5, vy + 0.5, vz + 0.5), face)
 
             if found_in_radius and best_node is not None:
                 return best_node
@@ -421,7 +421,7 @@ class DynamicMoveToTargetTask:
                         score = candidate_score(vx, vy, vz, face)
                         if best_score is None or score < best_score:
                             best_score = score
-                            best_node = Node((vx + 0.5, vy + 0.5, vz + 0.5), face)
+                            best_node = SurfaceNode((vx + 0.5, vy + 0.5, vz + 0.5), face)
 
         return best_node
     
@@ -510,11 +510,29 @@ class DynamicMoveToTargetTask:
                         and hasattr(self.rob, "current_moving_platform_contact_point")
                         and hasattr(self.planner, "transition_spatial_path_from_point_via_current_center")
                     ):
+                        moving_contact = self.rob.current_moving_platform_contact_point()
                         spatial_path = self.planner.transition_spatial_path_from_point_via_current_center(
-                            self.rob.current_moving_platform_contact_point(),
+                            moving_contact,
                             from_node,
                             to_node,
                         )
+
+                        # First step fallback: if contact-point path is unavailable or too
+                        # short, infer a virtual previous node near the moving contact so
+                        # the transition can still follow an obstacle-aware shell route.
+                        if (
+                            (not spatial_path or len(spatial_path) <= 2)
+                            and hasattr(self.planner, "transition_spatial_path_via_current_center")
+                        ):
+                            virtual_prev = self._find_closest_node(moving_contact)
+                            if virtual_prev is not None:
+                                alt_path = self.planner.transition_spatial_path_via_current_center(
+                                    virtual_prev,
+                                    from_node,
+                                    to_node,
+                                )
+                                if alt_path and len(alt_path) > len(spatial_path or []):
+                                    spatial_path = alt_path
                     self.rob.step_forward(from_node, to_node, prev_node=prev_node, spatial_path=spatial_path)
                     self.current_i += 1
                     continue
@@ -549,7 +567,7 @@ class DynamicMoveToTargetTask:
 
         return
     
-    def _extract_path_from_planner(self) -> list[Node]:
+    def _extract_path_from_planner(self) -> list[SurfaceNode]:
         """
         Extract path from D* Lite planner using stateless method.
         Does NOT modify planner's internal state (start position, km).
