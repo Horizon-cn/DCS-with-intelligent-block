@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
+from pathlib import Path
+
+_PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
 
 from kinematics_backend.analytical_ik import AnalyticalIKSolver
 from kinematics_backend.ik_types import PoseTarget

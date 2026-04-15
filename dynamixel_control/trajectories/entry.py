@@ -5,11 +5,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, Sequence
 
-from hardware_control.openRB150interface import OpenRB150
+_PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
+
 from robot_config.profile import ik_to_hardware_angles
 
 Trajectory = list[list[float]]
@@ -164,6 +168,8 @@ def execute_trajectory(
     if debug:
         print(f"[INFO] Loaded {len(trajectory)} waypoints in {resolved_frame} space.")
         return trajectory
+
+    from hardware_control.openRB150interface import OpenRB150
 
     bot = OpenRB150(port=port)
     try:

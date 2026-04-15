@@ -10,14 +10,19 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import sys
 from pathlib import Path
 from typing import TypeAlias
+
+_PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
 
 from kinematics_backend import AnalyticalIKSolver, PathBuilder, TaskSpaceWaypoint
 from robot_config.profile import build_robot
 
 
-DEFAULT_OUTPUT = Path("generated") / "task_space_trajectory.json"
+DEFAULT_OUTPUT = _PROJECT_DIR / "generated" / "task_space_trajectory.json"
 DEFAULT_SAMPLES_PER_SEGMENT = 10
 Number: TypeAlias = int | float
 AxisVector: TypeAlias = tuple[Number, Number, Number]

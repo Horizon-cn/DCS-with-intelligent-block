@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+_PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
 
 from kinematics_backend.visualizer import describe_chain, plot_chain
 from robot_config.profile import build_robot
