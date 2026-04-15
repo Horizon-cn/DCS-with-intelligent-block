@@ -146,8 +146,8 @@ python -m tools.visualize_robot --angles 180,224.6,86.95,222.6,180
 Set a PWM channel or read current Dynamixel positions:
 
 ```powershell
-python -m control.pwm_cli 1 90 --port COM8
-python -m control.pwm_cli --readback --port COM8
+python -m hardware_control.pwm_cli 1 90 --port COM8
+python -m hardware_control.pwm_cli --readback --port COM8
 ```
 
 ## Important Files
@@ -157,7 +157,7 @@ python -m control.pwm_cli --readback --port COM8
 - `trajectories/helpers.py`: waypoint normalization and interpolation helpers.
 - `robot_config/profile.py`: measured robot geometry and IK-to-hardware angle conversion.
 - `kinematics_backend/`: IK, robot definition, path building, and visualization helpers.
-- `control/openRB150interface.py`: host-side serial interface for the OpenRB-150 command protocol.
-- `control/pwm_cli.py`: quick PWM and Dynamixel readback utility.
+- `hardware_control/openRB150interface.py`: host-side serial interface for the OpenRB-150 command protocol.
+- `hardware_control/pwm_cli.py`: quick PWM and Dynamixel readback utility.
 - `tools/`: IK and geometry debugging CLIs.
 - `firmware/firmware.ino`: robot-side OpenRB-150 firmware command interpreter.

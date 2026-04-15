@@ -4,13 +4,13 @@ import time
 
 # --- USEAGE ---
 # Set PWM only:
-# python -m control.pwm_cli 1 90
+# python -m hardware_control.pwm_cli 1 90
 
 # Set PWM then read all Dynamixel positions:
-# python -m control.pwm_cli 1 90 --readback
+# python -m hardware_control.pwm_cli 1 90 --readback
 
 # Just read positions, no PWM command:
-# python -m control.pwm_cli --readback
+# python -m hardware_control.pwm_cli --readback
 
 def read_positions(ser):
     positions = {}

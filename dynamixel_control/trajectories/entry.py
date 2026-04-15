@@ -9,7 +9,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, Sequence
 
-from control.openRB150interface import OpenRB150
+from hardware_control.openRB150interface import OpenRB150
 from robot_config.profile import ik_to_hardware_angles
 
 Trajectory = list[list[float]]
