@@ -1,200 +1,150 @@
-# D* Lite 动态Replanning 集成指南
+# DCS-with-intelligent-block
 
-## 概述
+## Complete Analysis of dstar_surface_3d
 
-本项目已整合 D* Lite 增量规划算法，支持机器人在运动过程中随着占用栅格(occ)的变化实时更新路线。核心优化是**批量更新机制**——多个体素变化合并成单次规划，而不是逐个重新规划。
+## 1. How the Planning Problem Is Modeled
 
-## 核心改进
+### 1.1 Scenario and Goal
 
-### 1. 批量更新 API (DStarLiteSurface3D)
+This module does not perform unconstrained free-flight planning in the whole 3D space. Instead, it plans over free voxels adjacent to obstacle surfaces. Intuitively:
 
-```python
-# 缓冲单个更新
-planner.buffer_update((x, y, z), new_occ_value)
+- The robot state is at the center of a free voxel.
+- That voxel center must be adjacent to an obstacle face (one of its 6-neighbors is occupied).
+- The robot moves on this surface-adjacency graph.
 
-# 缓冲多个更新（高效）
-updates_dict = {(x1, y1, z1): 1, (x2, y2, z2): 0, ...}
-planner.buffer_updates(updates_dict)
+### 1.2 Node Definition
 
-# 应用所有缓冲更新 + 单次规划
-num_applied = planner.apply_batch_updates(replan=True)
+Each node is defined by:
 
-# 延迟规划：应用更新但不重新规划
-planner.apply_batch_updates(replan=False)
-planner.compute_shortest_path()  # 稍后手动规划
-```
+- `pos`: free-voxel center coordinate `(x+0.5, y+0.5, z+0.5)`
+- `face_dir`: direction toward an adjacent obstacle face (`+X/-X/+Y/-Y/+Z/-Z`)
 
-### 2. 动态移动任务 (DynamicMoveToTargetTask)
+In the current source code, `Node` hashing and equality compare only `pos`, not `face_dir`. This means different face directions at the same center are treated as the same graph node.
 
-新的 3D 规划任务类，自动监控 occ 变化并触发增量replanning：
+### 1.3 Valid Node Criteria
 
-**特性：**
-- ✅ 自动检测 occ 网格变化
-- ✅ 可配置的检测间隔（默认每10步）
-- ✅ 批量应用地图更新
-- ✅ 无缝path replanning
+`valid_node(node)` requires:
 
-**性能对比：**
-```
-传统方式（逐个更新）：N个体素变化 → N次 compute_shortest_path()
-新方式（批量更新）：N个体素变化 → 1次 compute_shortest_path()
-```
+1. The position is within map bounds.
+2. The corresponding voxel is free (`occ=0`).
+3. The voxel in `face_dir` is occupied (`occ=1`).
 
-## 使用指南
+So only free-voxel centers adjacent to obstacle surfaces are valid planning states.
 
-### 基础集成 (main.py)
+## 2. How Edges Are Generated on the Surface Graph
 
-```python
-from control.motion import DynamicMoveToTargetTask
-import numpy as np
+`successors(node)` mainly provides two motion types.
 
-# 初始化占用栅格
-X, Y, Z = 5, 5, 5
-occ = np.zeros((X, Y, Z), dtype=np.uint8)
-# ...填充 occ...
+### 2.1 In-Surface Sliding (slide)
 
-# 创建动态规划任务
-task = DynamicMoveToTargetTask(
-    occ=occ,
-    size_xyz=(X, Y, Z),
-    cube_stacks=cube_stacks,
-    cube_picked=cube_picked,
-    delta_per_step=0.002  # 每步移动距离
-)
+For each currently usable face direction, the planner tries one-step moves along four in-plane orthogonal directions:
 
-# 可选：调整replanning频率
-task.replan_interval = 20  # 每20步检查一次地图变化
+- The destination voxel must remain free.
+- The destination voxel must also have at least one available obstacle face direction (still surface-adjacent).
 
-# 设置起点和目标
-task.setup(
-    start_pos=(robot_x, robot_y, robot_z),
-    goal_pos=(target_x, target_y, target_z),
-    robot_id=robot_id
-)
+This corresponds to moving along obstacle surfaces.
 
-# 执行（自动处理replanning）
-task.begin(robot_id=robot_id)
-```
+### 2.2 Edge Flip Around a Corner (edge flip)
 
-### 高级用法：自定义replanning触发
+If two face normals are orthogonal (for example `+X` and `+Y`), they share an edge. The algorithm allows switching around the same obstacle voxel from one face to an orthogonal face, as long as the landing voxel is free and remains a valid surface-adjacent node.
 
-```python
-# 手动管理replanning
-task = DynamicMoveToTargetTask(...)
-task.replan_interval = float('inf')  # 禁用自动检测
+This corresponds to turning around obstacle corners.
 
-# ...在循环中...
-for _ in range(N):
-    # 自定义检测逻辑
-    if custom_condition_for_replanning():
-        changes = task.detect_map_changes()
-        if changes:
-            # 批量缓冲所有变化
-            task.planner.buffer_updates(changes)
-            # 单次应用+规划
-            task.planner.apply_batch_updates(replan=True)
-            # 重新提取路径
-            task.path = task._extract_path_from_planner()
-            task.current_i = 0
-```
+## 3. Core D* Lite States and Invariants
 
-## 工作流程
+This implementation uses the standard D* Lite two-value formulation:
 
-```
-监测阶段
-   ↓
-[检测到occ变化]
-   ↓
-缓冲所有变化（无规划）
-   ↓
-批量应用 + 单次规划
-   ↓
-提取新路径
-   ↓
-继续执行
-```
+- `g(s)`: current best-known estimated cost from `s` to goal (may be stale)
+- `rhs(s)`: one-step lookahead value, theoretically
+	`rhs(s) = min`<sub>`s' in Succ(s)`</sub>` (c(s,s') + g(s'))`
 
-## 配置参数
+When `g(s) == rhs(s)`, node `s` is consistent. Otherwise it is inconsistent and must be repaired via the priority queue.
 
-| 参数 | 默认值 | 说明 |
-|------|-------|------|
-| `delta_per_step` | 0.002 | 每步移动距离（单位：米） |
-| `replan_interval` | 10 | 检测地图变化的步数间隔 |
-| 3D规划网格大小 | (5,5,5) | 根据环境调整X,Y,Z维度 |
+At initialization:
 
-## 性能提示
+- `rhs(goal) = 0`
+- `g(goal) = INF`
+- Push `goal` into the OPEN priority queue using its key.
 
-1. **调整replanning间隔**
-   - 太小：频繁规划，CPU负荷高
-   - 太大：响应延迟，可能撞障碍
-   - 推荐：10-30 步
+This is equivalent to propagating values backward from the goal until `start` becomes consistent.
 
-2. **地图分辨率**
-   - 高分辨率：精度好但规划慢
-   - 低分辨率：快速但粗糙
-   - 推荐：与障碍物尺寸一致
+## 4. Key Design and Heuristic
 
-3. **批量规划优势**
-   - 100个体素变化：快10-50倍
-   - 特别适合动态场景（多物体移动）
+`key(s) = (k1, k2)`：
 
-## 测试
+- `m = min(g(s), rhs(s))`
+- `k1 = m + h(start, s) + km`
+- `k2 = m`
 
-运行测试脚本验证批量更新机制：
+Where:
 
-```bash
-cd /home/horizon/SAM\ lab/pybullet/robot_motion_project2
-python test_batch_replanning.py
-```
+`m = min(g, rhs)`
+This is the node's current optimistic value estimate. Smaller means more urgent.
 
-输出示例：
-```
-D* Lite Batch Replanning Test
-================================================================================
-1. Initial Planning
-   Start: Node(pos=(3.5, 4.5, 4.5), face_dir='+X')
-   Goal:  Node(pos=(7.5, 8.5, 7.5), face_dir='-Y')
-   Path length: 42 nodes
+`h(start, s)`
+Uses voxel L1 distance to prioritize nodes more relevant to the current `start` path.
 
-2. Testing Batch Update Mechanism
-   Generated 15 random map changes
-   Buffering updates (no replanning yet)...
-   Buffer size: 15 pending updates
-   Applying batch updates with replanning...
-   Applied 15 updates in 0.0234 seconds
-   ...
-```
+`km`
+A global offset used after start movement to preserve incremental behavior without recomputing all keys.
 
-## 故障排除
+`k2 = m`
+Used as a tie-breaker when `k1` is equal, giving stable and algorithm-compatible ordering.
 
-**问题：replanning后路径为空**
-- 检查start/goal节点是否仍有效
-- 验证occ网格新维度是否仍连通
-- 尝试增大replanning间隔
+The OPEN queue uses lazy deletion: outdated entries stay in the heap, and are discarded when popped if their key no longer matches.
 
-**问题：机器人卡住不动**
-- 检查路径提取是否成功：`len(task.path) > 0`
-- 验证速度参数：`delta_per_step` 不要过小
-- 检查Z轴约束：应保持 `cruise_z` 常数
+## 5. How `compute_shortest_path` Converges
 
-**问题：规划较慢**
-- 减少网格分辨率
-- 增加replanning间隔
-- 检查缓冲区大小：`planner.get_buffer_size()`
+The main loop processes OPEN until D* Lite stopping conditions are satisfied:
 
-## 参考文献
+1. The smallest OPEN key is no better than `key(start)`.
+2. `start` is consistent (`g(start) == rhs(start)`).
 
-- **D* Lite 算法**: Koenig & Likhachev (2002)
-- **增量规划**: Focused A* with replanning heuristics
-- **表面图规划**: Motion planning on voxel obstacle surfaces
+For each popped node `u`:
 
-## 相关文件
+- If `g(u) > rhs(u)`: a better path is found, so set `g(u)=rhs(u)` and update predecessors.
+- Otherwise: set `g(u)=INF` (revoke stale commitment), then update `u` and its predecessors.
 
-- `control/dstar_surface_3d.py` - D* Lite 核心实现（+batch API）
-- `control/motion.py` - `DynamicMoveToTargetTask` 类
-- `test_batch_replanning.py` - 测试脚本
-- `factory.py` - `rob_info.move_to()` 调用示例
+By repeatedly repairing inconsistent nodes, `g`/`rhs` converge toward Bellman-optimal relationships.
 
----
+## 6. How the Path Is Extracted from the Value Function
 
-**最后更新：2026-03-19** | 支持动态replanning的实时路线更新
+After value repair, path extraction follows a greedy policy:
+
+1. Start from current `start`.
+2. Pick successor `s` minimizing `c(start,s) + g(s)`.
+3. Move one step, update the current `start` and repeat.
+4. Stop at `goal` or when no feasible successor exists.
+
+This is the core logic of `next_step()` and `plan()`.
+
+This Bellman-greedy extraction yields a minimum-step path.
+
+## 7. Incremental Replanning in Dynamic Environments
+
+### 7.1 Single-Voxel Update
+
+`update_voxel(v, new_occ, deferred=False)`：
+
+- Immediately update occupancy.
+- Collect affected voxels (the changed voxel and its 6-neighbors).
+- Find affected planning nodes and call `update_vertex`.
+- Call `compute_shortest_path()` once.
+
+### 7.2 Batch Updates (Recommended)
+
+The implementation provides `buffer_update` / `buffer_updates` / `apply_batch_updates`:
+
+- Buffer multiple changes first.
+- Apply all occupancy updates in one pass.
+- Update all affected nodes in one pass.
+- Call `compute_shortest_path()` only once.
+
+This compresses N map changes from potentially N replans down to 1 replan, which is key for dynamic-scene performance.
+
+## 8. Intuitive Summary
+
+The essence of `dstar_surface_3d` can be summarized in three lines:
+
+1. Discretize surface-adjacent motion into a graph.
+2. Use D* Lite to maintain an optimal value function from any node to the goal.
+3. Move step-by-step along the successor minimizing `c + g` to follow the current optimal policy, while only repairing local changes when the map updates.

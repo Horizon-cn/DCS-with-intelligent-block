@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+
+# Generated trajectory output; regenerate from source scripts as needed.
+generated/
+
+# Local editor and OS metadata.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
