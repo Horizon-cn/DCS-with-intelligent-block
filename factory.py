@@ -163,7 +163,7 @@ class rob_info:
             )
         self.end_platform_orientation = end_state[1]
         self.base_platform_heading_dir = self._heading_dir_from_orientation(self.base_platform_orientation)
-        self.end_platform_heading_dir = self._heading_dir_from_orientation(self.end_platform_orientation)
+        self.end_platform_heading_dir = self._end_heading_from_base_heading(self.base_platform_heading_dir)
         self.fixed_heading_dir = self.base_platform_heading_dir
 
     def _platform_link(self, name: str) -> int:
@@ -216,6 +216,17 @@ class rob_info:
         rot = p.getMatrixFromQuaternion(orn)
         x_axis = (rot[0], rot[3], rot[6])  # local +X in world
         return self._closest_axis_label(x_axis, allowed=allowed)
+
+    @staticmethod
+    def _end_heading_from_base_heading(base_heading: str) -> str:
+        """Map base heading to end heading: invert Y/Z, keep X unchanged."""
+        opposite_yz = {
+            "+Y": "-Y",
+            "-Y": "+Y",
+            "+Z": "-Z",
+            "-Z": "+Z",
+        }
+        return opposite_yz.get(base_heading, base_heading)
 
     def planner_start_heading_dir(self, node) -> str:
         tangent_axes = tuple(
@@ -711,7 +722,7 @@ class rob_info:
         self.base_platform_orientation = base_orn
         self.end_platform_orientation = end_orn
         self.base_platform_heading_dir = self._heading_dir_from_orientation(base_orn)
-        self.end_platform_heading_dir = self._heading_dir_from_orientation(end_orn)
+        self.end_platform_heading_dir = self._end_heading_from_base_heading(self.base_platform_heading_dir)
 
         # Next step swaps fixed platform (new support platform is the one just moved).
         self.fixed_platform = moving_name
