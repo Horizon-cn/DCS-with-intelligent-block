@@ -1,5 +1,6 @@
 import math
 import random
+import threading
 import time
 from pathlib import Path
 
@@ -11,10 +12,7 @@ from control.dstar_surface_3d import DStarLiteSurface3D, FACES, NORM, Node
 from control.motion import DynamicMoveToTargetTask
 from factory import (
     create_cube_shapes,
-    create_cube,
     create_cube_stack,
-    create_robot,
-    create_robot_shapes,
     rob_info,
 )
 from simulation_setup import connect_and_configure, configure_visualizer, create_plane
@@ -73,9 +71,7 @@ def main() -> None:
     connect_and_configure(sim_cfg)
     configure_visualizer(cfg["visualizer"], enable_rendering=False)
 
-    obj_dict = {}
     robots_info = []
-    rob_num = 0
 
     plane_id = create_plane(cfg["plane"], sim_cfg["use_maximal_coordinates"])
 
@@ -115,53 +111,36 @@ def main() -> None:
                     if 0 <= ox < X and 0 <= oy < Y and 0 <= oz < Z and occ[ox, oy, oz] == 1:
                         valid_nodes.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
     
-    while True:
+    start_goal_pairs = []
+    while len(start_goal_pairs) < 2:
         start, goal = random.sample(valid_nodes, 2)
-        if start.pos != goal.pos and start.face_dir == "-Z":
-            break
-    print(f"Randomly sampled start node: pos={start.pos}, face_dir={start.face_dir}")   
+        if start.pos == goal.pos or start.face_dir != "-Z":
+            continue
+        if any(start.pos == prev_start.pos for prev_start, _ in start_goal_pairs):
+            continue
+        start_goal_pairs.append((start, goal))
 
-    cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube_org"])
-    cube_id = create_cube(
-        cubev_shape_id,
-        cubec_shape_id,
-        cfg["cube_org"],
-        [9, 1, 1],
-        sim_cfg["use_maximal_coordinates"],
-    )
+    for idx, (start, goal) in enumerate(start_goal_pairs, start=1):
+        print(
+            f"Robot {idx} sampled start: pos={start.pos}, face_dir={start.face_dir}, "
+            f"goal: pos={goal.pos}, face_dir={goal.face_dir}"
+        )
 
     new_robot_urdf = str(Path(__file__).resolve().parent.parent / "pybullet_data" / "new_robot.urdf")
-    start_base_pos, start_base_orn = _spawn_pose_from_start_node(start)
-    robot2_id = p.loadURDF(
-        new_robot_urdf,
-        basePosition=[1,8,1],
-        baseOrientation=[0, 0, 0, 1],
-        useFixedBase=False,
-        globalScaling=1.2,
-    )
-    robots_info.append(rob_info(robot_id=robot2_id, cube_picked=cube_picked))
-    rob_num+=1
-
-    robv_shape_id, robc_shape_id = create_robot_shapes(cfg["robot"])
-    robot1_id = create_robot(
-        robv_shape_id,
-        robc_shape_id,
-        cfg["robot"],
-        [6.5,1,1],
-        sim_cfg["use_maximal_coordinates"],
-    )
-    #robots_info.append(rob_info(robot_id=robot1_id, cube_picked=cube_picked))
-    rob_num+=1
-
-    robot_id = p.loadURDF(
-        new_robot_urdf,
-        basePosition=[8, 8, 0],
-        baseOrientation=[0, 0, 0, 1],
-        useFixedBase=False,
-    )
-
-    obj_dict["plane"] = plane_id
-    #obj_dict["cubes"] = cubes
+    robot_ids = []
+    start_base_poses = []
+    for start_node, _ in start_goal_pairs:
+        start_base_pos, start_base_orn = _spawn_pose_from_start_node(start_node)
+        rid = p.loadURDF(
+            new_robot_urdf,
+            basePosition=start_base_pos,
+            baseOrientation=start_base_orn,
+            useFixedBase=False,
+            globalScaling=1.2,
+        )
+        robot_ids.append(rid)
+        start_base_poses.append((start_base_pos, start_base_orn))
+        robots_info.append(rob_info(robot_id=rid, cube_picked=cube_picked))
 
     configure_visualizer(cfg["visualizer"], enable_rendering=True)
     step_simulation(600, sim_cfg["time_step"])
@@ -172,40 +151,57 @@ def main() -> None:
     #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
     # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
-    planner = DStarLiteSurface3D(
-        occ,
-        (X, Y, Z),
-        start,
-        goal,
-        start_heading_dir=robots_info[0].planner_start_heading_dir(start),
-        start_fixed_platform=robots_info[0].fixed_platform,
-    )
-    planner.plan_from_current()  # Initialize planning
-    path = planner.extract_oriented_path_stateless(max_steps=100)
-    planner.print_path_nodes(path)
-    planner.plot_3d_voxels_and_path(path)
+    for i in range(2):
+        preview_start, preview_goal = start_goal_pairs[i]
+        planner_preview = DStarLiteSurface3D(
+            occ,
+            (X, Y, Z),
+            preview_start,
+            preview_goal,
+            start_heading_dir=robots_info[i].planner_start_heading_dir(preview_start),
+            start_fixed_platform=robots_info[i].fixed_platform,
+        )
+        planner_preview.plan_from_current()
+        preview_path = planner_preview.extract_oriented_path_stateless(max_steps=100)
+        print(f"Robot {i + 1} initial 3D path:")
+        planner_preview.print_path_nodes(preview_path)
+        planner_preview.plot_3d_voxels_and_path(preview_path, title=f"Robot {i + 1} Initial 3D Path")
 
-    p.resetBasePositionAndOrientation(robot2_id, start_base_pos, start_base_orn)
+    tasks = []
+    for i in range(2):
+        start_node, goal_node = start_goal_pairs[i]
+        start_base_pos, start_base_orn = start_base_poses[i]
+        p.resetBasePositionAndOrientation(robot_ids[i], start_base_pos, start_base_orn)
 
-    task = DynamicMoveToTargetTask(
-        occ=occ,  # numpy array (X,Y,Z)
-        size_xyz=(X, Y, Z),
-        cube_stacks=cube_stacks,
-        cube_picked=cube_picked,
-        delta_per_step=0.002  # movement speed
-    )
+        task = DynamicMoveToTargetTask(
+            occ=occ,
+            size_xyz=(X, Y, Z),
+            cube_stacks=cube_stacks,
+            cube_picked=cube_picked,
+            delta_per_step=0.002,
+        )
+        task.replan_interval = 20
+        task.setup(
+            start_pos=start_base_pos,
+            goal_pos=goal_node.pos,
+            robot=robots_info[i],
+            start_node=start_node,
+            goal_node=goal_node,
+        )
+        tasks.append(task)
 
-    task.replan_interval = 20  # Check map changes every 20 simulation steps
-
-    task.setup(
-        start_pos=start_base_pos,
-        goal_pos=goal.pos,
-        robot=robots_info[0],
-        start_node=start,
-        goal_node=goal,
-    )
-
-    task.begin()
+    start_barrier = threading.Barrier(len(tasks))
+    workers = [
+        threading.Thread(
+            target=lambda t=task: (start_barrier.wait(), t.begin()),
+            daemon=False,
+        )
+        for task in tasks
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
 
     # for x in range(len(cube_stacks)):
     #     for y in range(len(cube_stacks[x])):
