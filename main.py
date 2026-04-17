@@ -77,7 +77,7 @@ def main() -> None:
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
     # 2D stack grid: cube_stacks[x][y] -> one stack(list[int]).
-    X, Y, Z = 5, 5, 4
+    X, Y, Z = 10, 10, 3
     occ = np.zeros((X, Y, Z), dtype=np.uint8)
     cube_stacks = [[[] for _ in range(Y)] for _ in range(X)]
     for x in range(X):
@@ -112,7 +112,7 @@ def main() -> None:
                         valid_nodes.append(Node((x + 0.5, y + 0.5, zc + 0.5), f))
     
     start_goal_pairs = []
-    while len(start_goal_pairs) < 2:
+    while len(start_goal_pairs) < 3:
         start, goal = random.sample(valid_nodes, 2)
         if start.pos == goal.pos or start.face_dir != "-Z":
             continue
@@ -151,7 +151,7 @@ def main() -> None:
     #     new_base = move_rob_dir(robot_id, new_base, 30, plane_id)
     # new_base = move_rob_dir(robot_id, new_base, 0, plane_id)
 
-    for i in range(2):
+    for i in range(3):
         preview_start, preview_goal = start_goal_pairs[i]
         planner_preview = DStarLiteSurface3D(
             occ,
@@ -168,7 +168,7 @@ def main() -> None:
         planner_preview.plot_3d_voxels_and_path(preview_path, title=f"Robot {i + 1} Initial 3D Path")
 
     tasks = []
-    for i in range(2):
+    for i in range(3):
         start_node, goal_node = start_goal_pairs[i]
         start_base_pos, start_base_orn = start_base_poses[i]
         p.resetBasePositionAndOrientation(robot_ids[i], start_base_pos, start_base_orn)
