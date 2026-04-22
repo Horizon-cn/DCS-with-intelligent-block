@@ -508,7 +508,7 @@ class rob_info:
 
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
-        dt = 1/960
+        dt = 1/9600
         max_force = 1000000
         pos_tol = 0.005
         orn_tol = 0.035
@@ -682,11 +682,11 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=300,
+                    steps=100,
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=500)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=200)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()

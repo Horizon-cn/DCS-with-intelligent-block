@@ -77,7 +77,7 @@ def main() -> None:
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
     # 2D stack grid: cube_stacks[x][y] -> one stack(list[int]).
-    X, Y, Z = 10, 10, 3
+    X, Y, Z = 10, 10, 4
     occ = np.zeros((X, Y, Z), dtype=np.uint8)
     cube_stacks = [[[] for _ in range(Y)] for _ in range(X)]
     for x in range(X):

@@ -249,12 +249,12 @@ class DStarLiteSurface3D:
         fx = p[0] - ix
         fy = p[1] - iy
         fz = p[2] - iz
-        return (eps+1e-9 < fx < 1.0 - eps-1e-9) and (eps+1e-9 < fy < 1.0 - eps-1e-9) and (eps+1e-9 < fz < 1.0 - eps-1e-9)
+        return (eps+5e-2 < fx < 1.0 - eps-5e-2) and (eps+5e-2 < fy < 1.0 - eps-5e-2) and (eps+5e-2 < fz < 1.0 - eps-5e-2)
 
     def _segment_is_clear(self, a: Tuple[float, float, float], b: Tuple[float, float, float], sample_dist: float = 0.1) -> bool:
         d = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
         dist = self._norm3(d)
-        if dist < 1e-9:
+        if dist < 5e-2:
             return not self._point_strictly_inside_obstacle(a)
 
         n_samples = max(2, int(math.ceil(dist / max(1e-6, sample_dist))))
@@ -277,7 +277,7 @@ class DStarLiteSurface3D:
     ) -> bool:
         d = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
         dist = self._norm3(d)
-        if dist < 1e-9:
+        if dist < 5e-2:
             ra = self._norm3((a[0] - center[0], a[1] - center[1], a[2] - center[2]))
             if ra < r_min - shell_eps or ra > r_max + shell_eps:
                 return False
