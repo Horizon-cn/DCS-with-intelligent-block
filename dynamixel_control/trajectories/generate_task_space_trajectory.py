@@ -70,23 +70,19 @@ def _rows_to_keyframes(rows: list[KeyframeRow]) -> list[TaskSpaceWaypoint]:
 
 def build_keyframes() -> list[TaskSpaceWaypoint]:
     """Return task-space keyframes authored as compact editable rows."""
+    """Z is the gripper 2 pose in the gripper 1 CYS"""
     rows: list[KeyframeRow] = [
-        #    X,   Y,  Z, forward axis, gripper 1, gripper 2
+        #X,   Y,  Z, forward axis, gripper 1, gripper 2
         [85,   0,  0, (-1, 0, 0),       100,       100],
-        [85,   0,  0, (-1, 0, 0),       180,       100],
-        [85,   0, 35, (-1, 0, 0)],
-        [170,  0, 35, (-1, 0, 0)],
+        [85,   0,  0, (-1, 0, 0),       100,       170],
+        [85,   0, -35, (-1, 0, 0)],
+        [170,   0, -35, (-1, 0, 0)],
         [170,  0,  0, (-1, 0, 0)],
-        [170,  0,  0, (-1, 0, 0),       100,       100],
-        [170,  0,  0, (-1, 0, 0),       180,       100],
-        [170,  0, 35, (-1, 0, 0)],
-        [85,   0, 35, (-1, 0, 0)],
-        [85,  85, 35, (-1, 0, 0)],
-        [0,   85, 35, (-1, 0, 0)],
-        [85,  85, 35, (-1, 0, 0)],
-        [85,   0, 35, (-1, 0, 0)],
-        [85,   0,  0, (-1, 0, 0)],
-        [85,   0,  0, (-1, 0, 0),       110,       110],
+        [170,  0,  0, (-1, 0, 0)],
+        [170,  0,  0, (-1, 0, 0),       170,       100],
+        [170,  0,  35, (-1, 0, 0)],
+        [85,  0,  35, (-1, 0, 0)],
+        [85,  0,  0, (-1, 0, 0),       110,       110],
     ]
     return _rows_to_keyframes(rows)
 

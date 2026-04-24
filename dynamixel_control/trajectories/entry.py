@@ -151,7 +151,7 @@ def _disable_torque(bot: OpenRB150, ids: Sequence[int] = DEFAULT_DXL_IDS) -> Non
 def execute_trajectory(
     source: TrajectorySource,
     *,
-    port: str = "COM8",
+    port: str = "COM9",
     delay: float = 0.5,
     readback: bool = False,
     debug: bool = False,
@@ -185,7 +185,7 @@ def execute_trajectory(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Execute a trajectory on the OpenRB-150.")
     parser.add_argument("source", help="Path to a .py or .json trajectory file")
-    parser.add_argument("--port", default="COM8", help="Serial port for the OpenRB-150")
+    parser.add_argument("--port", default="COM9", help="Serial port for the OpenRB-150")
     parser.add_argument("--delay", type=float, default=0.5, help="Seconds between waypoints")
     parser.add_argument("--readback", action="store_true", help="Print joint readback after each step")
     parser.add_argument("--debug", action="store_true", help="Load and convert only; do not send to hardware")

@@ -55,12 +55,12 @@ bool applyDxlConfig(uint8_t id) {
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
 
-  USB.begin(115200);
+  USB.begin(1000000);
   while (!USB);
 
   USB.println("[BOOT] USB ready");
 
-  dxl.begin(57600);
+  dxl.begin(1000000);
   dxl.setPortProtocolVersion(2.0);  // XL430 + XL330 are all Protocol 2.0
 
   USB.println("[BOOT] Configuring Dynamixels");
