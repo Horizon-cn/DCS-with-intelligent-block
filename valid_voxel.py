@@ -210,6 +210,37 @@ def _build_occ_for_candidate(cand: StepCandidate, size_xyz: Tuple[int, int, int]
     return occ
 
 
+def _build_robot_occupied_voxels(cand: StepCandidate) -> set[Tuple[int, int, int]]:
+    """Build robot-occupied voxels with special stacking/bridge rules."""
+    start = cand.start_free_voxel
+    end = cand.end_free_voxel
+    occupied: set[Tuple[int, int, int]] = {start, end}
+
+    def above(v: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        return (v[0], v[1], v[2] + 1)
+
+    # Layer relation rules between start and end free voxels.
+    dz = start[2] - end[2]
+    if dz == 0:
+        occupied.add(above(start))
+        occupied.add(above(end))
+    elif dz == 1:
+        occupied.add(above(end))
+    elif dz == -1:
+        occupied.add(above(start))
+
+    # For edge flip, add the voxel exactly between start/end when it exists on grid coordinates.
+    if cand.move_type == "edge_flip":
+        sx, sy, sz = start
+        ex, ey, ez = end
+        if (sx + ex) % 2 == 0 and (sy + ey) % 2 == 0 and (sz + ez) % 2 == 0:
+            mid = ((sx + ex) // 2, (sy + ey) // 2, (sz + ez) // 2)
+            if mid != start and mid != end:
+                occupied.add(mid)
+
+    return occupied
+
+
 def create_demo_occupancy(size_xyz: Tuple[int, int, int] = (8, 8, 6)) -> np.ndarray:
     """Create a demo world with floor + blocks to expose multiple step types."""
     X, Y, Z = size_xyz
@@ -400,7 +431,7 @@ def plot_valid_step_voxel(
         start_state.fixed_platform,
     )
 
-    red_voxels = {cand.start_free_voxel, cand.end_free_voxel}
+    red_voxels = _build_robot_occupied_voxels(cand)
     green_voxels = {cand.start_surface_voxel, cand.end_surface_voxel}
 
     all_voxels = sorted(red_voxels | green_voxels)
