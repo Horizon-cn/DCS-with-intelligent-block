@@ -3,7 +3,7 @@ simulation:
   time_step: 0.004166666666666667  # 1/240
   solver_iterations: 200
   use_maximal_coordinates: true
-  settle_steps: 80
+  settle_steps: 50
   post_move_steps: 6000
 
 plane:

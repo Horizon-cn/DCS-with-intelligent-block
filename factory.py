@@ -588,12 +588,12 @@ class rob_info:
 
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
-        dt = 1/960
+        dt = 1/9600
         max_force = 900000000
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
-        max_hold_steps = 240
+        max_hold_steps = 60
 
         if active_joint is not None and active_joint not in cur:
             raise ValueError(f"active_joint {active_joint} is not a movable joint")
@@ -769,11 +769,11 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=120,
+                    steps=160,
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=120)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=160)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()
