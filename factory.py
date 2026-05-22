@@ -366,7 +366,7 @@ class rob_info:
         face_dir: str | None = None,
         face_pos=None,
         avoid_radius: float = 0.4,
-        min_spacing: float = 0.05,
+        min_spacing: float = 0.08,
     ):
         """Resample a polyline to a fixed number of waypoints, including endpoints."""
         def _nudge_inside_voxel(pt, clearance: float = 0.1):
@@ -593,7 +593,7 @@ class rob_info:
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
-        max_hold_steps = 120
+        max_hold_steps = 240
 
         if active_joint is not None and active_joint not in cur:
             raise ValueError(f"active_joint {active_joint} is not a movable joint")
