@@ -182,7 +182,6 @@ def main() -> None:
         )
         task.replan_interval = 20
         task.setup(
-            start_pos=start_base_pos,
             goal_pos=goal_node.pos,
             robot=robots_info[i],
             start_node=start_node,
