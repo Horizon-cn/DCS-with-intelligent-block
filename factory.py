@@ -330,7 +330,44 @@ class rob_info:
             float(contact_point[2]) + z_axis[2] * center_offset,
         )
 
-    def _resample_polyline_waypoints(self, points, waypoint_count: int = 8):
+    def _avoid_negative_face_cylinder(self, point, face_dir: str, face_pos, radius: float = 0.4):
+        """Shift point outside the cylinder along the -face_dir axis from face_pos."""
+        n = self.FACE_NORM[face_dir]
+        axis_dir = (-n[0], -n[1], -n[2])
+        v = (point[0] - face_pos[0], point[1] - face_pos[1], point[2] - face_pos[2])
+        axial = self._dot(v, axis_dir)
+
+        # Only constrain points in the -face_dir half-line.
+        if axial < 0.0:
+            return point
+
+        proj = (axis_dir[0] * axial, axis_dir[1] * axial, axis_dir[2] * axial)
+        perp = (v[0] - proj[0], v[1] - proj[1], v[2] - proj[2])
+        dist = self._norm(perp)
+        if dist >= radius:
+            return point
+
+        if dist < 1e-9:
+            ref = (1.0, 0.0, 0.0) if abs(axis_dir[0]) < 0.9 else (0.0, 1.0, 0.0)
+            perp = self._normalize(self._cross(axis_dir, ref))
+        else:
+            perp = (perp[0] / dist, perp[1] / dist, perp[2] / dist)
+
+        new_v = (
+            proj[0] + perp[0] * radius,
+            proj[1] + perp[1] * radius,
+            proj[2] + perp[2] * radius,
+        )
+        return (face_pos[0] + new_v[0], face_pos[1] + new_v[1], face_pos[2] + new_v[2])
+
+    def _resample_polyline_waypoints(
+        self,
+        points,
+        waypoint_count: int = 8,
+        face_dir: str | None = None,
+        face_pos=None,
+        avoid_radius: float = 0.4,
+    ):
         """Resample a polyline to a fixed number of waypoints, including endpoints."""
         pts = [tuple(float(v) for v in pt) for pt in points]
         if len(pts) <= 1 or waypoint_count <= 1:
@@ -372,7 +409,14 @@ class rob_info:
             )
 
         out.append(pts[-1])
-        return out
+
+        if face_dir is None or face_pos is None:
+            return out
+
+        return [
+            self._avoid_negative_face_cylinder(pt, face_dir, face_pos, radius=avoid_radius)
+            for pt in out
+        ]
 
     def platform_contact_point(self, platform_name: str):
         """Return the current world-space contact point of the named platform."""
@@ -668,7 +712,14 @@ class rob_info:
         # If planner provides a feasible shell/surface path, follow intermediate
         # contact waypoints to reduce large IK jumps.
         if spatial_path and len(spatial_path) > 2:
-            path_points = self._resample_polyline_waypoints(spatial_path, waypoint_count=8)
+            face_pos = self._node_face_midpoint(from_node)
+            path_points = self._resample_polyline_waypoints(
+                spatial_path,
+                waypoint_count=8,
+                face_dir=from_node.face_dir,
+                face_pos=face_pos,
+                avoid_radius=0.4,
+            )
             print(f"Following spatial path with {len(path_points)} waypoints for smoother motion")
             inner_points = path_points[1:-1]
 
@@ -682,11 +733,11 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=200,
+                    steps=150,
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=200)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=150)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()
