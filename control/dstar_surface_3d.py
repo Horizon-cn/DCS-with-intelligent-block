@@ -273,7 +273,7 @@ class DStarLiteSurface3D:
         r_min: float,
         r_max: float,
         sample_dist: float = 0.1,
-        shell_eps: float = 1.5e-1,
+        shell_eps: float = 1.6e-1,
     ) -> bool:
         d = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
         dist = self._norm3(d)
