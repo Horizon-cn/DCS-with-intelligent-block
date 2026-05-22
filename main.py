@@ -54,7 +54,7 @@ def _spawn_pose_from_start_node(node: Node):
     """
     nx, ny, nz = NORM[node.face_dir]
     # Keep position identical to start.face_mid definition.
-    pos = [node.pos[0] + 0.5 * (nx+1), node.pos[1] + 0.5 * (ny+1), node.pos[2] + 0.5 * nz+0.05]
+    pos = [node.pos[0] + 0.5 * (nx+1), node.pos[1] + 0.5 * (ny+1), node.pos[2] + 0.5 * nz+0.06]
 
     # Use -Z as the reference orientation: node.face_dir == -Z => identity quaternion.
     orn = _quat_from_to((0.0, 0.0, -1.0), (float(nx), float(ny), float(nz)))

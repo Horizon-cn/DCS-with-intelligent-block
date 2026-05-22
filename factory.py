@@ -331,13 +331,12 @@ class rob_info:
         )
 
     def _avoid_negative_face_cylinder(self, point, face_dir: str, face_pos, radius: float = 0.4):
-        """Shift point outside the cylinder along the -face_dir axis from face_pos."""
-        n = self.FACE_NORM[face_dir]
-        axis_dir = (-n[0], -n[1], -n[2])
+        """Shift point outside the cylinder along the +face_dir axis from face_pos."""
+        axis_dir = self.FACE_NORM[face_dir]
         v = (point[0] - face_pos[0], point[1] - face_pos[1], point[2] - face_pos[2])
         axial = self._dot(v, axis_dir)
 
-        # Only constrain points in the -face_dir half-line.
+        # Only constrain points in the +face_dir half-line.
         if axial < 0.0:
             return point
 
@@ -370,6 +369,22 @@ class rob_info:
         min_spacing: float = 0.05,
     ):
         """Resample a polyline to a fixed number of waypoints, including endpoints."""
+        def _nudge_inside_voxel(pt, clearance: float = 0.1):
+            def _adjust_axis(v):
+                base = math.floor(v)
+                frac = v - base
+                if frac < clearance:
+                    return base + clearance
+                if frac > 1.0 - clearance:
+                    return base + (1.0 - clearance)
+                return v
+
+            return (
+                _adjust_axis(pt[0]),
+                _adjust_axis(pt[1]),
+                _adjust_axis(pt[2]),
+            )
+
         def _resample(points_in):
             pts = [tuple(float(v) for v in pt) for pt in points_in]
             if len(pts) <= 1 or waypoint_count <= 1:
@@ -416,12 +431,13 @@ class rob_info:
         out = _resample(points)
 
         if face_dir is None or face_pos is None:
-            return out
+            return [_nudge_inside_voxel(pt) for pt in out]
 
         adjusted = [
             self._avoid_negative_face_cylinder(pt, face_dir, face_pos, radius=avoid_radius)
             for pt in out
         ]
+        adjusted = [_nudge_inside_voxel(pt) for pt in adjusted]
 
         if min_spacing <= 0.0:
             return adjusted
@@ -436,7 +452,7 @@ class rob_info:
         if total_len < min_spacing * max(1, waypoint_count - 1):
             return adjusted
 
-        return _resample(adjusted)
+        return [_nudge_inside_voxel(pt) for pt in _resample(adjusted)]
 
     def platform_contact_point(self, platform_name: str):
         """Return the current world-space contact point of the named platform."""
@@ -573,7 +589,7 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = 1/960
-        max_force = 800000000
+        max_force = 900000000
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
@@ -753,11 +769,11 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=150,
+                    steps=120,
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=150)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=120)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()
