@@ -294,7 +294,6 @@ class DynamicMoveToTargetTask:
     
     def setup(
         self,
-        start_pos: tuple[float,float,float],
         goal_pos: tuple[float,float,float],
         robot: Any,
         start_node: SurfaceNode | None = None,
