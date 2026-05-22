@@ -325,8 +325,8 @@ class rob_info:
         z_axis = (rot[2], rot[5], rot[8])  # local +Z in world
         center_offset = -self._platform_contact_sign(platform_name) * self.PLATFORM_HALF_THICKNESS
         return (
-            float(contact_point[0]) + z_axis[0] * center_offset,
-            float(contact_point[1]) + z_axis[1] * center_offset,
+            float(contact_point[0]) + z_axis[0] * center_offset+0.5,
+            float(contact_point[1]) + z_axis[1] * center_offset+0.5,
             float(contact_point[2]) + z_axis[2] * center_offset,
         )
 
@@ -509,7 +509,7 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = 1/960
-        max_force = 1000000
+        max_force = 800000000
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
@@ -682,7 +682,7 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=300,
+                    steps=500,
                     smooth=False,
                 )
 
