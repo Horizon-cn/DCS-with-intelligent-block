@@ -367,56 +367,76 @@ class rob_info:
         face_dir: str | None = None,
         face_pos=None,
         avoid_radius: float = 0.4,
+        min_spacing: float = 0.05,
     ):
         """Resample a polyline to a fixed number of waypoints, including endpoints."""
-        pts = [tuple(float(v) for v in pt) for pt in points]
-        if len(pts) <= 1 or waypoint_count <= 1:
-            return pts
+        def _resample(points_in):
+            pts = [tuple(float(v) for v in pt) for pt in points_in]
+            if len(pts) <= 1 or waypoint_count <= 1:
+                return pts
 
-        seg_lengths = []
-        total_len = 0.0
-        for i in range(len(pts) - 1):
-            dx = pts[i + 1][0] - pts[i][0]
-            dy = pts[i + 1][1] - pts[i][1]
-            dz = pts[i + 1][2] - pts[i][2]
-            seg_len = math.sqrt(dx * dx + dy * dy + dz * dz)
-            seg_lengths.append(seg_len)
-            total_len += seg_len
+            seg_lengths = []
+            total_len = 0.0
+            for i in range(len(pts) - 1):
+                dx = pts[i + 1][0] - pts[i][0]
+                dy = pts[i + 1][1] - pts[i][1]
+                dz = pts[i + 1][2] - pts[i][2]
+                seg_len = math.sqrt(dx * dx + dy * dy + dz * dz)
+                seg_lengths.append(seg_len)
+                total_len += seg_len
 
-        if total_len < 1e-9:
-            return [pts[0]] * waypoint_count
+            if total_len < 1e-9:
+                return [pts[0]] * waypoint_count
 
-        targets = [total_len * i / (waypoint_count - 1) for i in range(waypoint_count)]
-        out = [pts[0]]
-        seg_idx = 0
-        traversed = 0.0
+            targets = [total_len * i / (waypoint_count - 1) for i in range(waypoint_count)]
+            out = [pts[0]]
+            seg_idx = 0
+            traversed = 0.0
 
-        for target_dist in targets[1:-1]:
-            while seg_idx < len(seg_lengths) - 1 and traversed + seg_lengths[seg_idx] < target_dist:
-                traversed += seg_lengths[seg_idx]
-                seg_idx += 1
+            for target_dist in targets[1:-1]:
+                while seg_idx < len(seg_lengths) - 1 and traversed + seg_lengths[seg_idx] < target_dist:
+                    traversed += seg_lengths[seg_idx]
+                    seg_idx += 1
 
-            seg_len = max(seg_lengths[seg_idx], 1e-9)
-            t = (target_dist - traversed) / seg_len
-            p0 = pts[seg_idx]
-            p1 = pts[seg_idx + 1]
-            out.append(
-                (
-                    p0[0] + (p1[0] - p0[0]) * t,
-                    p0[1] + (p1[1] - p0[1]) * t,
-                    p0[2] + (p1[2] - p0[2]) * t,
+                seg_len = max(seg_lengths[seg_idx], 1e-9)
+                t = (target_dist - traversed) / seg_len
+                p0 = pts[seg_idx]
+                p1 = pts[seg_idx + 1]
+                out.append(
+                    (
+                        p0[0] + (p1[0] - p0[0]) * t,
+                        p0[1] + (p1[1] - p0[1]) * t,
+                        p0[2] + (p1[2] - p0[2]) * t,
+                    )
                 )
-            )
 
-        out.append(pts[-1])
+            out.append(pts[-1])
+            return out
+
+        out = _resample(points)
 
         if face_dir is None or face_pos is None:
             return out
 
-        return [
+        adjusted = [
             self._avoid_negative_face_cylinder(pt, face_dir, face_pos, radius=avoid_radius)
             for pt in out
         ]
+
+        if min_spacing <= 0.0:
+            return adjusted
+
+        total_len = 0.0
+        for i in range(len(adjusted) - 1):
+            dx = adjusted[i + 1][0] - adjusted[i][0]
+            dy = adjusted[i + 1][1] - adjusted[i][1]
+            dz = adjusted[i + 1][2] - adjusted[i][2]
+            total_len += math.sqrt(dx * dx + dy * dy + dz * dz)
+
+        if total_len < min_spacing * max(1, waypoint_count - 1):
+            return adjusted
+
+        return _resample(adjusted)
 
     def platform_contact_point(self, platform_name: str):
         """Return the current world-space contact point of the named platform."""
