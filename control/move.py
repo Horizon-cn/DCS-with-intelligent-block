@@ -83,7 +83,7 @@ def move_joint(robot_id: int, joint_index: int, target_angle: float,
     direction = 1 if target_angle > cur_angle else -1
     tol = 0.001  
     max_steps = steps * 3
-    max_force = 8000000000
+    max_force = 80000000000
     num_joints = p.getNumJoints(robot_id)
 
     for j in range(num_joints):

@@ -348,14 +348,15 @@ class rob_info:
 
         if dist < 1e-9:
             ref = (1.0, 0.0, 0.0) if abs(axis_dir[0]) < 0.9 else (0.0, 1.0, 0.0)
-            perp = self._normalize(self._cross(axis_dir, ref))
+            perp_unit = self._normalize(self._cross(axis_dir, ref))
         else:
-            perp = (perp[0] / dist, perp[1] / dist, perp[2] / dist)
+            perp_unit = (perp[0] / dist, perp[1] / dist, perp[2] / dist)
 
+        ortho = self._normalize(self._cross(axis_dir, perp_unit))
         new_v = (
-            proj[0] + perp[0] * radius,
-            proj[1] + perp[1] * radius,
-            proj[2] + perp[2] * radius,
+            proj[0] + ortho[0] * radius,
+            proj[1] + ortho[1] * radius,
+            proj[2] + ortho[2] * radius,
         )
         return (face_pos[0] + new_v[0], face_pos[1] + new_v[1], face_pos[2] + new_v[2])
 
@@ -365,11 +366,11 @@ class rob_info:
         waypoint_count: int = 8,
         face_dir: str | None = None,
         face_pos=None,
-        avoid_radius: float = 0.4,
-        min_spacing: float = 0.08,
+        avoid_radius: float = 0.38,
+        min_spacing: float = 0.05,
     ):
         """Resample a polyline to a fixed number of waypoints, including endpoints."""
-        def _nudge_inside_voxel(pt, clearance: float = 0.1):
+        def _nudge_inside_voxel(pt, clearance: float = 0.15):
             def _adjust_axis(v):
                 base = math.floor(v)
                 frac = v - base
@@ -589,7 +590,7 @@ class rob_info:
         cur = {j: p.getJointState(self.robot_id, j)[0] for j in revolute_joints}
         sim_cfg = cfg["simulation"]
         dt = 1/960
-        max_force = 900000000
+        max_force = 80000000000
         pos_tol = 0.005
         orn_tol = 0.035
         joint_tol = 0.01
@@ -769,11 +770,11 @@ class rob_info:
                     moving_link,
                     waypoint_pos,
                     target_moving_orn,
-                    steps=120,
+                    steps=180,
                     smooth=False,
                 )
 
-        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=120)
+        self._smooth_apply_ik(moving_link, target_moving_pos, target_moving_orn, steps=180)
 
         ik = self._calculate_ik_for_platform_target(moving_link, target_moving_pos, target_moving_orn)
         revolute_joints = self._movable_joints()
