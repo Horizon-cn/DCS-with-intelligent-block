@@ -342,7 +342,8 @@ class DynamicMoveToTargetTask:
                 start_heading_dir=start_heading_dir,
                 start_fixed_platform=start_fixed_platform,
             )
-            self.path = self.planner.plan_oriented(max_steps=100)
+            self.planner.plan_from_current()
+            self.path = self.planner.extract_oriented_path_stateless(max_steps=100)
             
             if not self.path:
                 print(f"Warning: No path found from {start_node} to {goal_node}")
@@ -517,6 +518,7 @@ class DynamicMoveToTargetTask:
                             self.reached = True
                             continue
 
+                        self.planner.visited_faces.clear()
                         self.planner.buffer_updates(changed_voxels)
                         self.planner.apply_batch_updates(replan=True)
 
