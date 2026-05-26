@@ -81,7 +81,7 @@ def main() -> None:
 
     cubev_shape_id, cubec_shape_id = create_cube_shapes(cfg["cube"])
     # 2D stack grid: cube_stacks[x][y] -> one stack(list[int]).
-    X, Y, Z = 5, 5, 4
+    X, Y, Z = 6, 6, 4
     occ = np.zeros((X, Y, Z), dtype=np.uint8)
     cube_stacks = [[[] for _ in range(Y)] for _ in range(X)]
     for x in range(X):
@@ -195,7 +195,7 @@ def main() -> None:
         delta_per_step=0.002  # movement speed
     )
 
-    task.replan_interval = 20  # Check map changes every 20 simulation steps
+    task.replan_interval = 1  # Check map changes every 20 simulation steps
 
     task.setup(
         goal_pos=goal.pos,
