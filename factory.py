@@ -748,7 +748,37 @@ class rob_info:
 
         # If planner provides a feasible shell/surface path, follow intermediate
         # contact waypoints to reduce large IK jumps.
-        if spatial_path and len(spatial_path) > 2:
+        if prev_node is None:
+            if not spatial_path or len(spatial_path) < 2:
+                spatial_path = [
+                    self.current_moving_platform_contact_point(),
+                    self._node_face_midpoint(to_node),
+                ]
+            face_pos = self._node_face_midpoint(from_node)
+            path_points = self._resample_polyline_waypoints(
+                spatial_path,
+                waypoint_count=8,
+                face_dir=from_node.face_dir,
+                face_pos=face_pos,
+                avoid_radius=0.4,
+            )
+            print(f"Following spatial path with {len(path_points)} waypoints for smoother motion")
+            inner_points = path_points[1:-1]
+
+            for contact_pt in inner_points:
+                waypoint_pos = self._platform_center_from_contact_point(
+                    contact_pt,
+                    target_moving_orn,
+                    moving_name,
+                )
+                self._smooth_apply_ik(
+                    moving_link,
+                    waypoint_pos,
+                    target_moving_orn,
+                    steps=180,
+                    smooth=False,
+                )
+        elif spatial_path and len(spatial_path) > 2:
             face_pos = self._node_face_midpoint(from_node)
             path_points = self._resample_polyline_waypoints(
                 spatial_path,
